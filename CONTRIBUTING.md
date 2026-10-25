@@ -163,5 +163,6 @@ required to merge.
 
 ## Code of Conduct
 
-This project follows the [Contributor Covenant 3.0](CODE_OF_CONDUCT.md). Please read it
+This project follows the [Contributor Covenant 3.0](https://github.com/ashlar-display/.github/blob/HEAD/CODE_OF_CONDUCT.md),
+the code of conduct of every [Ashlar](https://ashlar-display.org) repository. Please read it
 before participating.
