@@ -1,9 +1,9 @@
 # PIAF
 
-[![CI](https://github.com/DracoWhitefire/piaf/actions/workflows/ci.yml/badge.svg)](https://github.com/DracoWhitefire/piaf/actions/workflows/ci.yml)
+[![CI](https://github.com/ashlar-display/piaf/actions/workflows/ci.yml/badge.svg)](https://github.com/ashlar-display/piaf/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/piaf.svg)](https://crates.io/crates/piaf)
 [![docs.rs](https://docs.rs/piaf/badge.svg)](https://docs.rs/piaf)
-[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/DracoWhitefire/piaf/blob/main/LICENSE)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/ashlar-display/piaf/blob/main/LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rustc-1.85+-orange.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
 [![SLSA Level 2](https://slsa.dev/images/gh-badge-level2.svg)](https://slsa.dev)
 [![trusted publishing only](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcrates.io%2Fapi%2Fv1%2Fcrates%2Fpiaf&query=%24.crate.trustpub_only&label=trusted%20publishing%20only)](#verifying-releases)
@@ -389,16 +389,24 @@ Extended documentation lives under [`doc/`](doc/).
 ## Verifying releases
 
 Releases are built on GitHub Actions and attested with
-[SLSA Build Level 2](https://slsa.dev) provenance (from the next release after 0.4.1). To
-verify a release `.crate` against its signed provenance, install the
+[SLSA Build Level 2](https://slsa.dev) provenance (from 0.4.2). To verify a release
+`.crate` against its signed provenance, install the
 [GitHub CLI](https://cli.github.com/) and run:
 
 ```sh
-gh attestation verify piaf-X.Y.Z.crate --repo DracoWhitefire/piaf
+gh attestation verify piaf-X.Y.Z.crate --repo ashlar-display/piaf
+```
+
+The release from before the repository moved to the `ashlar-display` organization (0.4.2)
+was attested under its previous owner, and verifies against it:
+
+```sh
+gh attestation verify piaf-0.4.2.crate --owner DracoWhitefire \
+  --signer-repo DracoWhitefire/piaf
 ```
 
 The attested `.crate` is attached to each
-[GitHub release](https://github.com/DracoWhitefire/piaf/releases).
+[GitHub release](https://github.com/ashlar-display/piaf/releases).
 
 Those releases are also uploaded through crates.io
 [trusted publishing](https://rust-lang.github.io/rfcs/3691-trusted-publishing-cratesio.html): the publish
@@ -417,4 +425,4 @@ Versions up to 0.4.1 were uploaded with an API token (0.1.0 and 0.4.1 by hand, 0
 
 ## License
 
-Licensed under the [Mozilla Public License 2.0](https://github.com/DracoWhitefire/piaf/blob/main/LICENSE).
+Licensed under the [Mozilla Public License 2.0](https://github.com/ashlar-display/piaf/blob/main/LICENSE).

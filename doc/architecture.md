@@ -167,9 +167,10 @@ avoids encoding policy or heuristics into what is fundamentally a decoded repres
 - **`no_std` compatibility**: The core library avoids the Rust standard library to remain usable in firmware, bootloaders, and embedded systems. `alloc` may be used where dynamic allocation is required (e.g., for extension block storage and the dynamic handler pipeline). The static pipeline and all scalar field decoding are available without any allocator.
 - **Zero-copy**: `parse_edid` returns `ParsedEdidRef<'_>`, which borrows the base block and all extension blocks directly from the input slice. No block data is copied unless `parse_edid_owned` is called explicitly.
 - **Dead-code warnings in bare `no_std` builds**: Without `alloc` or `std`, the handler layer is absent and the `pub(crate)` decode functions on model types (e.g. `ManufactureDate::from_edid_bytes`) appear unused. These functions are intentionally left available — a consumer with no handler pipeline can still call them directly. A blanket `#![cfg_attr(not(any(feature = "alloc", feature = "std")), allow(dead_code, unused_imports))]` in `lib.rs` suppresses the noise without removing the items.
-- **Attested releases.** From the next release after 0.4.1, every release is published
-  through a GitHub Actions workflow, with crates.io trusted publishing, that signs the
-  `.crate` package with [SLSA Build Level 2](https://slsa.dev) provenance. Verify with
-  `gh attestation verify <file> --repo DracoWhitefire/piaf`. Versions up to 0.4.1 carry no
-  provenance.
+- **Attested releases.** From 0.4.2, every release is published through a GitHub Actions
+  workflow, with crates.io trusted publishing, that signs the `.crate` package with
+  [SLSA Build Level 2](https://slsa.dev) provenance. Verify with
+  `gh attestation verify <file> --repo ashlar-display/piaf` (0.4.2, from before the move to
+  the `ashlar-display` organization: see "Verifying releases" in the README). Versions up
+  to 0.4.1 carry no provenance.
 
