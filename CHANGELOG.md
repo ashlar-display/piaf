@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Horizontal blanking on decoded modes.** `VideoMode::h_blank` (display-types 0.4.4) is
+  set for every mode whose source gives the timing: EDID and CTA Detailed Timing
+  Descriptors, DisplayID detailed timings (Types I, II, VI, VII), DisplayID Type IX
+  (from the CVT formula), and VIC and DMT lookups. Modes known only by resolution and
+  refresh rate (established and standard timings, CVT 3-byte codes) leave it `None`.
+- **`EdidWarning::DtdBordersAmbiguous`** for a Detailed Timing Descriptor with non-zero
+  borders. EDID 1.3 counts the borders in the blanking, EDID 1.4 does not; piaf reads
+  them as 1.3 (as EDIDs in practice do, and as its refresh rate already did), so
+  `h_blank` is the blanking minus both borders, and the warning says so. When the
+  borders are wider than the blanking, `h_blank` is left `None`.
+
 ### Changed
 
 - **Part of Ashlar** — the README now opens with a block naming the
@@ -23,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verifies with `--owner DracoWhitefire --signer-repo DracoWhitefire/piaf` (see "Verifying
   releases" in the README). The code of conduct is now the organization's, shared by every
   Ashlar repository; the repository's own copy is removed.
+
+### Fixed
+
+- **Detailed Timing Blocks in a VESA Video Timing Block Extension** (CTA extended tag
+  0x03) were decoded by a separate decoder that kept only the resolution, refresh rate
+  and interlace flag. They now go through the same decoder as every other DTD, with the
+  pixel clock, porches, sync, borders, stereo and `h_blank`, and its warnings.
 
 ## [0.4.2] - 2026-10-18
 

@@ -78,20 +78,22 @@ fn decode_type_1_7_descriptor_body(d: &[u8; 20], pixel_clock_unit_khz: u32) -> O
     let refresh_rate = RefreshRate::from_ratio(pixel_clock_hz, total_pixels)?;
 
     Some(
-        VideoMode::new(h_active, v_active, refresh_rate, interlaced).with_detailed_timing(
-            pixel_clock_khz,
-            h_front_porch,
-            h_sync_width,
-            v_front_porch,
-            v_sync_width,
-            0,
-            0,
-            StereoMode::None,
-            Some(SyncDefinition::DigitalSeparate {
-                v_sync_positive,
-                h_sync_positive,
-            }),
-        ),
+        VideoMode::new(h_active, v_active, refresh_rate, interlaced)
+            .with_detailed_timing(
+                pixel_clock_khz,
+                h_front_porch,
+                h_sync_width,
+                v_front_porch,
+                v_sync_width,
+                0,
+                0,
+                StereoMode::None,
+                Some(SyncDefinition::DigitalSeparate {
+                    v_sync_positive,
+                    h_sync_positive,
+                }),
+            )
+            .with_h_blank(h_blank),
     )
 }
 
@@ -152,20 +154,22 @@ pub(super) fn decode_type_ii_descriptor(d: &[u8; 11], sink: &mut dyn ModeSink) {
     };
 
     sink.push_mode(
-        VideoMode::new(h_active, v_active, refresh_rate, interlaced).with_detailed_timing(
-            (pixel_clock_10khz * 10) as u32,
-            h_front_porch,
-            h_sync_width,
-            v_front_porch,
-            v_sync_width,
-            0,
-            0,
-            StereoMode::None,
-            Some(SyncDefinition::DigitalSeparate {
-                v_sync_positive,
-                h_sync_positive,
-            }),
-        ),
+        VideoMode::new(h_active, v_active, refresh_rate, interlaced)
+            .with_detailed_timing(
+                (pixel_clock_10khz * 10) as u32,
+                h_front_porch,
+                h_sync_width,
+                v_front_porch,
+                v_sync_width,
+                0,
+                0,
+                StereoMode::None,
+                Some(SyncDefinition::DigitalSeparate {
+                    v_sync_positive,
+                    h_sync_positive,
+                }),
+            )
+            .with_h_blank(h_blank),
     );
 }
 
@@ -269,20 +273,22 @@ pub(super) fn decode_type_vi_descriptor(d: &[u8], sink: &mut dyn ModeSink) -> us
     };
 
     sink.push_mode(
-        VideoMode::new(h_active, v_active, refresh_rate, interlaced).with_detailed_timing(
-            pixel_clock_khz,
-            h_fp,
-            h_sync_width,
-            v_fp,
-            v_sync_width,
-            0,
-            0,
-            StereoMode::None,
-            Some(SyncDefinition::DigitalSeparate {
-                h_sync_positive,
-                v_sync_positive,
-            }),
-        ),
+        VideoMode::new(h_active, v_active, refresh_rate, interlaced)
+            .with_detailed_timing(
+                pixel_clock_khz,
+                h_fp,
+                h_sync_width,
+                v_fp,
+                v_sync_width,
+                0,
+                0,
+                StereoMode::None,
+                Some(SyncDefinition::DigitalSeparate {
+                    h_sync_positive,
+                    v_sync_positive,
+                }),
+            )
+            .with_h_blank(h_blank),
     );
 
     descriptor_size
@@ -375,6 +381,7 @@ mod tests {
         assert_eq!(mode.height, 1080);
         assert_eq!(mode.refresh_rate, Some(RefreshRate::integral(60)));
         assert!(!mode.interlaced);
+        assert_eq!(mode.h_blank, Some(280));
     }
 
     #[test]
@@ -451,6 +458,7 @@ mod tests {
         assert_eq!(mode.refresh_rate, Some(RefreshRate::integral(60)));
         assert_eq!(mode.h_front_porch, 88);
         assert_eq!(mode.h_sync_width, 48);
+        assert_eq!(mode.h_blank, Some(280)); // 8 + 8 × 34
         assert_eq!(mode.v_front_porch, 3);
         assert_eq!(mode.v_sync_width, 13);
         assert!(!mode.interlaced);
@@ -557,6 +565,7 @@ mod tests {
         assert_eq!(mode.height, 1080);
         assert_eq!(mode.refresh_rate, Some(RefreshRate::integral(60)));
         assert!(!mode.interlaced);
+        assert_eq!(mode.h_blank, Some(280));
         assert_eq!(mode.h_front_porch, 88);
         assert_eq!(mode.h_sync_width, 44);
         assert_eq!(mode.v_front_porch, 4);
@@ -677,6 +686,7 @@ mod tests {
         assert_eq!(mode.height, 1080);
         assert_eq!(mode.refresh_rate, Some(RefreshRate::integral(60)));
         assert!(!mode.interlaced);
+        assert_eq!(mode.h_blank, Some(280));
         assert_eq!(mode.h_front_porch, 88);
         assert_eq!(mode.h_sync_width, 44);
         assert_eq!(mode.v_front_porch, 4);

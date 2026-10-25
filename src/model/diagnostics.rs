@@ -44,6 +44,25 @@ pub enum EdidWarning {
     /// a few hundred MHz (fits comfortably in a `u32` after scaling by 10 000).
     #[error("DTD slot skipped: pixel clock overflow during refresh rate calculation")]
     DtdPixelClockOverflow,
+    /// A Detailed Timing Descriptor has non-zero borders, which EDID versions read
+    /// differently. The mode is kept.
+    ///
+    /// EDID 1.3 §3.12 counts the borders in the horizontal and vertical blanking; EDID 1.4
+    /// §3.12 does not. EDIDs in practice follow 1.3 (as edid-decode observes), and piaf
+    /// reads them that way: the line total is active + blanking, and
+    /// [`VideoMode::h_blank`][crate::VideoMode::h_blank] is the blanking minus both
+    /// borders. Under the 1.4 reading the blanking would be 2 × `h_border` larger, and the
+    /// refresh rate lower, at the same pixel clock. When the blanking is smaller than both
+    /// borders together, no reading fits and `h_blank` is left `None`.
+    #[error(
+        "DTD has non-zero borders ({h_border} pixels, {v_border} lines); its blanking is read as including them (EDID 1.3)"
+    )]
+    DtdBordersAmbiguous {
+        /// Horizontal border on each side, in pixels (byte 15).
+        h_border: u8,
+        /// Vertical border on each side, in lines (byte 16).
+        v_border: u8,
+    },
     /// The number of extension blocks declared in the base block exceeds the parser's
     /// safety limit. Only the first `limit` blocks were parsed; the rest were ignored.
     ///

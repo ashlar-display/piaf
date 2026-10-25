@@ -147,6 +147,9 @@ pub(super) fn decode_type_ix_descriptor(d: &[u8; 6], sink: &mut dyn ModeSink) {
             StereoMode::None,
             None,
         );
+        if let Some(h_blank) = t.h_total.checked_sub(h_active) {
+            mode = mode.with_h_blank(h_blank);
+        }
     }
 
     sink.push_mode(mode);
@@ -496,6 +499,7 @@ mod tests {
         let mode = &caps.supported_modes[0];
         assert_eq!(mode.cvt_algorithm, Some(CvtAlgorithm::CvtRb));
         assert_eq!(mode.pixel_clock_khz, Some(138_500));
+        assert_eq!(mode.h_blank, Some(160)); // CVT-RB v1: h_total 2080
         assert_eq!(mode.h_front_porch, 48);
         assert_eq!(mode.h_sync_width, 32);
         assert_eq!(mode.v_front_porch, 3);
@@ -513,6 +517,7 @@ mod tests {
         let mode = &caps.supported_modes[0];
         assert_eq!(mode.cvt_algorithm, Some(CvtAlgorithm::CvtR2));
         assert_eq!(mode.pixel_clock_khz, Some(133_320));
+        assert_eq!(mode.h_blank, Some(80));
         assert_eq!(mode.h_front_porch, 8);
         assert_eq!(mode.h_sync_width, 32);
         assert_eq!(mode.v_front_porch, 17);

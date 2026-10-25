@@ -271,7 +271,7 @@ fn handle_extended_tag_block(
             cea_caps.vesa_display_device = parse_vesa_display_device(&block_data[1..]);
         }
         Some(EXT_TAG_VTB_EXT) => {
-            if let Some(vtb) = parse_vtb_ext(&block_data[1..]) {
+            if let Some(vtb) = parse_vtb_ext(&block_data[1..], &mut |w| caps.push_warning(w)) {
                 for timing in &vtb.timings {
                     push_mode_dedup(&mut caps.supported_modes, timing.clone());
                 }
@@ -417,7 +417,12 @@ pub(crate) fn cea861_collection_into_sink(collection: &[u8], sink: &mut dyn Mode
             #[cfg(any(feature = "alloc", feature = "std"))]
             match block_data.first().copied() {
                 Some(EXT_TAG_VTB_EXT) => {
-                    if let Some(vtb) = parse_vtb_ext(&block_data[1..]) {
+                    let mut found = Vec::new();
+                    let vtb = parse_vtb_ext(&block_data[1..], &mut |w| found.push(w));
+                    for w in found {
+                        sink.push_warning(w);
+                    }
+                    if let Some(vtb) = vtb {
                         for timing in vtb.timings {
                             sink.push_mode(timing);
                         }
