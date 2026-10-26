@@ -33,7 +33,8 @@ input slice. `capabilities_from_edid` then runs the registered extension handler
 structure and produces a `DisplayCapabilities` — the typed, stable model your application
 works with. Keeping these steps separate means you can inspect the raw parse result for
 debugging, or run multiple handler configurations over the same parsed data without re-parsing.
-Use `parse_edid_owned` to get an owned `ParsedEdid` that can outlive the input buffer.
+With `alloc` or `std`, use `parse_edid_owned` to get an owned `ParsedEdid` that can outlive the
+input buffer.
 
 ```rust
 use piaf::{parse_edid, capabilities_from_edid, ExtensionLibrary, ScreenSize};
@@ -187,9 +188,11 @@ In bare `no_std`, `parse_edid` returns a `ParsedEdidRef<'_>` that borrows extens
 directly from the input slice — no allocator needed. Both base-block fields and extension-block
 modes are available through `capabilities_from_edid_static` at all build tiers.
 
-`parse_edid_owned` returns a `ParsedEdid` that copies block bytes into owned storage; in bare
-`no_std` the extension block field is absent (alloc-gated), so prefer `ParsedEdidRef` from
-`parse_edid` when extension block access matters.
+`parse_edid_owned` and `ParsedEdid`, the owned form that copies the blocks, need `alloc` or
+`std`; in bare `no_std`, keep the input buffer and use the `ParsedEdidRef` from `parse_edid`.
+The parse warnings are available in every build through `warnings()` / `iter_warnings()`;
+without `alloc`, `parse_edid` stores up to `MAX_PARSE_WARNINGS` (8) and `warnings_dropped()`
+counts the rest.
 
 ### Fields in `DisplayCapabilities` available in all build configurations
 

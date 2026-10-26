@@ -19,6 +19,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-exported. New warnings: `EdidWarning::HdmiAudioNonMixedWithoutMultiStream`,
   `HdmiAudio3dDescriptorsExceedBlock` (none taken), `HdmiAudio3dUnsupportedFormat` (that
   descriptor skipped).
+- **Warning storage is private, with the same API in every build.** Public fields whose
+  type or presence depended on the `alloc` feature broke `no_std` code as soon as another
+  crate in the build enabled `alloc`; the warnings now sit behind accessors, and where
+  storage is fixed, warnings that do not fit are counted instead of silently dropped.
+  - `StaticDisplayCapabilities`: the `warnings` and `num_warnings` fields are replaced by
+    `warnings() -> &[EdidWarning]`, `iter_warnings()` and `warnings_dropped() -> u16`
+    (saturating). It stores up to the new `MAX_STATIC_WARNINGS` (8), as before.
+  - `ParsedEdidRef`: the `warnings` field (`Vec<ParseWarning>` with `alloc`,
+    `[Option<EdidWarning>; 8]` without) and `num_warnings` are replaced by the same three
+    accessors. The warnings are `EdidWarning`s in every build: with `alloc`,
+    `iter_warnings()` yields `&EdidWarning` instead of `&ParseWarning`, so no
+    `downcast_ref` is needed. Without `alloc`, `parse_edid` stores up to the new
+    `parser::MAX_PARSE_WARNINGS` (8) and counts the rest.
+  - `ParsedEdid`, `parse_edid_owned` and `From<ParsedEdidRef>` need `alloc` or `std`.
+    Without them, `ParsedEdid` held only the base block, so the static pipeline given one
+    silently decoded no extension block; keep the input buffer and use the `ParsedEdidRef`
+    from `parse_edid` instead. Its `warnings` field is replaced by the same accessors
+    (`warnings_dropped()` is always 0); `base_block` and `extensions` stay public.
+  - `EdidSource` gains `parse_warnings() -> &[EdidWarning]` and
+    `parse_warnings_dropped() -> u16`, both defaulted, so existing implementations still
+    compile. The default `propagate_parse_warnings` now copies `parse_warnings()`; it was a
+    no-op.
 
 ### Added
 
@@ -62,6 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`capabilities_from_edid_static` dropped the base block's warnings in alloc builds**
   (bare `no_std` builds kept them): `DtdPixelClockOverflow`, the DTD border warnings and
   the rest now reach the static output in every build.
+- **`capabilities_from_edid_static` dropped the parser's warnings** (`SizeMismatch`,
+  `UnknownExtension`, `ExtensionBlockLimitReached`), which the dynamic pipeline keeps. They
+  now come first in the static output, ahead of the base block's and the handlers', and
+  `warnings_dropped()` includes the ones the parser could not store.
 - **Detailed Timing Blocks in a VESA Video Timing Block Extension** (CTA extended tag
   0x03) were decoded by a separate decoder that kept only the resolution, refresh rate
   and interlace flag. They now go through the same decoder as every other DTD, with the

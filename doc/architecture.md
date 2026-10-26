@@ -44,7 +44,7 @@ format is specified, all of its defined fields are decoded into the model.
 ## Core pipeline
 
 Two capability pipelines operate on any `EdidSource` — either `ParsedEdidRef<'_>` (zero-copy,
-from `parse_edid`) or `ParsedEdid` (owned, from `parse_edid_owned`). Choose one pipeline per
+from `parse_edid`) or `ParsedEdid` (owned, from `parse_edid_owned`; `alloc`/`std`). Choose one pipeline per
 call site:
 
 **Dynamic pipeline** (`alloc`/`std`) — full metadata extraction, heap-allocated output:
@@ -96,14 +96,14 @@ The parser should avoid embedding higher-level policy decisions where possible.
 
 ### Intermediate representation
 
-`ParsedEdidRef<'_>` (zero-copy, borrowed) and `ParsedEdid` (owned, copied) both preserve the
+`ParsedEdidRef<'_>` (zero-copy, borrowed) and `ParsedEdid` (owned, copied; `alloc`/`std`) both preserve the
 structure of the decoded data closely enough to support inspection, debugging, and later
 refinement. Both implement `EdidSource`, which is the abstraction the capability pipelines
 work against.
 
 `ParsedEdidRef<'_>` is the primary output of `parse_edid` — it borrows block data directly
-from the input slice without copying. `ParsedEdid` is available via `parse_edid_owned` for
-cases where the result must outlive the input buffer.
+from the input slice without copying, in every build. With `alloc`, `ParsedEdid` is available
+via `parse_edid_owned` for cases where the result must outlive the input buffer.
 
 This representation is distinct from the end-user capability model.
 
@@ -136,12 +136,15 @@ Diagnostics should distinguish between:
 
 This distinction is important because real display data is often imperfect. Warnings are collected from both the parser and the extension handlers and surfaced on the output structures.
 
-In `alloc`/`std` builds, warnings are stored as `ParseWarning` — a type-erased
+The parser's warnings are `EdidWarning` values in every build, behind the same accessors
+(`warnings()`, `iter_warnings()`, `warnings_dropped()`) on `ParsedEdidRef` and `ParsedEdid`.
+`DisplayCapabilities` (`alloc`/`std`) stores its warnings as `ParseWarning` — a type-erased
 `Arc<dyn Error + Send + Sync + 'static>`. This keeps the warning channel open to custom
 extension handlers, which can push their own error types without modifying the core
 `EdidWarning` enum. Built-in library code emits `EdidWarning` variants; callers use
-`downcast_ref` to recover concrete types. In bare `no_std` builds, warnings are stored
-as `EdidWarning` values directly.
+`downcast_ref` to recover concrete types. `StaticDisplayCapabilities` stores `EdidWarning`
+values directly, up to a fixed capacity, and counts the rest. Where storage is fixed, nothing
+is lost silently: `warnings_dropped()` reports what did not fit.
 
 ## Design principles
 

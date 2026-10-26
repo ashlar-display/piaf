@@ -34,16 +34,19 @@ for mode in caps.iter_modes() {
 ### `capabilities_from_edid_static`
 
 ```rust
-pub fn capabilities_from_edid_static<const N: usize>(
-    parsed: &ParsedEdid,
+pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
+    parsed: &T,
     handlers: &[&dyn StaticExtensionHandler],
 ) -> StaticDisplayCapabilities<N>
 ```
 
 Available unconditionally. Decodes the base block through the same logic as
 `capabilities_from_edid`, then dispatches each extension block to the first handler whose
-`tag()` matches. In bare `no_std` builds, extension blocks are not stored in `ParsedEdid`, so
-the result contains base-block data only.
+`tag()` matches. In bare `no_std` builds, pass the `ParsedEdidRef` from `parse_edid`: it
+borrows the extension blocks, so they are processed at every tier.
+
+The result's warnings are the parser's first, then the base block's, then the handlers'.
+`warnings_dropped()` includes the warnings the parser could not store.
 
 `capabilities_from_edid_static` is a **replacement** for `capabilities_from_edid`, not a
 complement. Calling both on the same EDID will process extension blocks twice.
@@ -178,10 +181,6 @@ a concern.
 
 **`preferred_image_size_mm`.** Populated correctly from the base block. Not populated from CEA
 DTDs — that field is a base-block concern and does not belong to the extension pipeline.
-
-**Extension blocks in bare `no_std`.** `ParsedEdid` does not store extension blocks at the bare
-`no_std` tier (no `alloc` feature). `capabilities_from_edid_static` returns base-block data
-only in that configuration; passing handlers has no effect.
 
 **Multi-block formats in bare `no_std`.** In `alloc`/`std` builds, the dispatch layer collects
 all fragments for a given tag and calls the handler once with the full slice. In bare `no_std`
