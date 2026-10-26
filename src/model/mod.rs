@@ -74,7 +74,7 @@ pub mod capabilities;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use capabilities::ExtensionData;
 pub use capabilities::{
-    CvtAlgorithm, DisplayCapabilities, ModeSink, RefreshRate, StaticContext,
+    CvtAlgorithm, DisplayCapabilities, MAX_STATIC_WARNINGS, ModeSink, RefreshRate, StaticContext,
     StaticDisplayCapabilities, StereoMode, SyncDefinition, TypeIxStereoMode, VideoMode,
 };
 pub use display_types::{

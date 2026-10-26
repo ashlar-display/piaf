@@ -554,11 +554,7 @@ mod tests {
         let mut caps = crate::model::StaticDisplayCapabilities::<4>::default();
         let mut ctx = crate::model::StaticContext::new(&mut caps);
         StaticExtensionHandler::process(&DisplayIdHandler, &[&block], &mut ctx);
-        assert_eq!(caps.num_warnings, 1, "expected exactly one warning");
-        assert_eq!(
-            caps.warnings[0],
-            Some(EdidWarning::DisplayIdChecksumMismatch)
-        );
+        assert_eq!(caps.warnings(), [EdidWarning::DisplayIdChecksumMismatch]);
     }
 
     #[test]

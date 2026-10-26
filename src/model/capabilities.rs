@@ -90,8 +90,9 @@ impl ModeSink for DisplayCapabilities {
 /// Contains the same scalar fields as [`DisplayCapabilities`] plus a fixed-capacity mode list.
 /// Use `MAX_MODES` to set the maximum number of video modes that can be stored; 64 is a
 /// reasonable default for most displays (real displays rarely declare more than ~40 modes).
-/// Modes beyond the capacity are silently dropped, matching the behaviour of the 8-entry
-/// warning cap.
+/// Modes beyond the capacity are silently dropped. Warnings are capped at
+/// [`MAX_STATIC_WARNINGS`]; those beyond it are counted in
+/// [`warnings_dropped`][Self::warnings_dropped].
 ///
 /// Produced by `capabilities_from_edid_static`.
 ///
@@ -240,13 +241,57 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     pub supported_modes: [Option<VideoMode>; MAX_MODES],
     /// Number of valid entries in [`supported_modes`][Self::supported_modes].
     pub num_modes: usize,
-    /// Non-fatal conditions collected from the parser and all handlers.
-    ///
-    /// Capped at 8 entries; warnings beyond the first 8 are silently dropped.
-    /// Use [`iter_warnings`][Self::iter_warnings] for a safe iterator.
-    pub warnings: [Option<EdidWarning>; 8],
-    /// Number of valid entries in [`warnings`][Self::warnings].
-    pub num_warnings: usize,
+    // Non-fatal conditions collected from the parser and all handlers.
+    warnings: StaticWarnings,
+}
+
+/// The number of warnings a [`StaticDisplayCapabilities`] stores; further warnings are
+/// counted in [`warnings_dropped`][StaticDisplayCapabilities::warnings_dropped].
+pub const MAX_STATIC_WARNINGS: usize = 8;
+
+// Fills the unused warning slots; never returned (`as_slice()` stops at `len`).
+const PLACEHOLDER_WARNING: EdidWarning = EdidWarning::DescriptorParseFailed;
+
+// Inline warning storage: the first `len` entries are real, the rest are
+// `PLACEHOLDER_WARNING`, so the warnings can be returned as a slice.
+#[derive(Clone)]
+struct StaticWarnings {
+    items: [EdidWarning; MAX_STATIC_WARNINGS],
+    len: usize,
+    dropped: u16,
+}
+
+impl StaticWarnings {
+    const fn new() -> Self {
+        Self {
+            items: [PLACEHOLDER_WARNING; MAX_STATIC_WARNINGS],
+            len: 0,
+            dropped: 0,
+        }
+    }
+
+    fn as_slice(&self) -> &[EdidWarning] {
+        &self.items[..self.len]
+    }
+
+    fn push(&mut self, w: EdidWarning) {
+        if self.len < MAX_STATIC_WARNINGS {
+            self.items[self.len] = w;
+            self.len += 1;
+        } else {
+            self.dropped = self.dropped.saturating_add(1);
+        }
+    }
+}
+
+// By hand, so that it prints the warnings in use, never the unused slots.
+impl core::fmt::Debug for StaticWarnings {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StaticWarnings")
+            .field("items", &self.as_slice())
+            .field("dropped", &self.dropped)
+            .finish()
+    }
 }
 
 impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
@@ -302,8 +347,7 @@ impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
             // `core::array::from_fn` constructs each slot individually.
             supported_modes: core::array::from_fn(|_| None),
             num_modes: 0,
-            warnings: Default::default(),
-            num_warnings: 0,
+            warnings: StaticWarnings::new(),
         }
     }
 }
@@ -314,9 +358,20 @@ impl<const MAX_MODES: usize> StaticDisplayCapabilities<MAX_MODES> {
         self.supported_modes[..self.num_modes].iter().flatten()
     }
 
-    /// Returns an iterator over collected warnings.
+    /// The collected warnings, in the order they occurred.
+    pub fn warnings(&self) -> &[EdidWarning] {
+        self.warnings.as_slice()
+    }
+
+    /// Returns an iterator over collected warnings, in the order they occurred.
     pub fn iter_warnings(&self) -> impl Iterator<Item = &EdidWarning> {
-        self.warnings[..self.num_warnings].iter().flatten()
+        self.warnings().iter()
+    }
+
+    /// The number of warnings that did not fit in the [`MAX_STATIC_WARNINGS`] slots
+    /// (saturating at `u16::MAX`).
+    pub fn warnings_dropped(&self) -> u16 {
+        self.warnings.dropped
     }
 }
 
@@ -345,10 +400,6 @@ impl<const MAX_MODES: usize> ModeSink for StaticDisplayCapabilities<MAX_MODES> {
     }
 
     fn push_warning(&mut self, w: EdidWarning) {
-        if self.num_warnings < 8 {
-            self.warnings[self.num_warnings] = Some(w);
-            self.num_warnings += 1;
-        }
-        // Warnings beyond capacity are silently dropped.
+        self.warnings.push(w);
     }
 }
