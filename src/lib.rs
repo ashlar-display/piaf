@@ -77,14 +77,14 @@ pub use capabilities::capabilities_from_edid;
 pub use capabilities::capabilities_from_edid_static;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use capabilities::{
-    AudioFormat, AudioFormatInfo, AudioSampleRates, Cea861Capabilities, ColorimetryBlock,
-    ColorimetryFlags, DtcPointEncoding, HdmiAudioBlock, HdmiDscMaxSlices, HdmiForumDsc,
-    HdmiForumFrl, HdmiForumSinkCap, HdmiVsdb, HdmiVsdbFlags, HdrDynamicMetadataDescriptor, HdrEotf,
-    HdrStaticMetadata, InfoFrameDescriptor, RoomConfigurationBlock, ShortAudioDescriptor,
-    SpeakerAllocation, SpeakerAllocationFlags, SpeakerAllocationFlags2, SpeakerAllocationFlags3,
-    SpeakerLocationEntry, T7VtdbBlock, T8VtdbBlock, T10VtdbBlock, T10VtdbEntry,
-    VendorSpecificBlock, VesaDisplayDeviceBlock, VesaTransferCharacteristic, VideoCapability,
-    VideoCapabilityFlags, VtbExtBlock, infoframe_type,
+    Audio3dChannels, Audio3dSpeakerAllocation, AudioFormat, AudioFormatInfo, AudioSampleRates,
+    Cea861Capabilities, ColorimetryBlock, ColorimetryFlags, DtcPointEncoding, HdmiAudioBlock,
+    HdmiDscMaxSlices, HdmiForumDsc, HdmiForumFrl, HdmiForumSinkCap, HdmiVsdb, HdmiVsdbFlags,
+    HdrDynamicMetadataDescriptor, HdrEotf, HdrStaticMetadata, InfoFrameDescriptor,
+    RoomConfigurationBlock, ShortAudioDescriptor, SpeakerAllocation, SpeakerAllocationFlags,
+    SpeakerAllocationFlags2, SpeakerAllocationFlags3, SpeakerLocationEntry, T7VtdbBlock,
+    T8VtdbBlock, T10VtdbBlock, T10VtdbEntry, VendorSpecificBlock, VesaDisplayDeviceBlock,
+    VesaTransferCharacteristic, VideoCapability, VideoCapabilityFlags, VtbExtBlock, infoframe_type,
 };
 pub use capabilities::{
     CEA861_HANDLER, Cea861Handler, DISPLAYID_HANDLER, DisplayIdHandler, STANDARD_HANDLERS,

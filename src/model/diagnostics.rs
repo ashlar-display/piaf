@@ -86,6 +86,28 @@ pub enum EdidWarning {
         /// Horizontal sync pulse width, in pixels.
         h_sync_width: u16,
     },
+    /// An HDMI Audio Data Block declares MS NonMixed support with a maximum stream count of
+    /// one (edid-decode and libdisplay-info both flag this). The flag is kept as declared.
+    #[error("HDMI Audio Data Block: MS NonMixed support declared with a single stream")]
+    HdmiAudioNonMixedWithoutMultiStream,
+    /// An HDMI Audio Data Block claims more 3D audio descriptors (plus the speaker
+    /// allocation that follows them, 4 bytes each) than it holds; none are taken.
+    #[error(
+        "HDMI Audio Data Block claims {claimed} 3D audio descriptors, but holds only {available_bytes} bytes for them"
+    )]
+    HdmiAudio3dDescriptorsExceedBlock {
+        /// The number of 3D audio descriptors claimed (byte 2, bits 2:0).
+        claimed: u8,
+        /// The bytes left in the block for descriptors.
+        available_bytes: u8,
+    },
+    /// An HDMI 3D Audio Descriptor has a format other than L-PCM or One Bit Audio, the
+    /// only two it may carry; the descriptor is skipped.
+    #[error("HDMI 3D Audio Descriptor with unsupported format code {code}; skipped")]
+    HdmiAudio3dUnsupportedFormat {
+        /// The audio format code (byte 0, bits 3:0).
+        code: u8,
+    },
     /// The number of extension blocks declared in the base block exceeds the parser's
     /// safety limit. Only the first `limit` blocks were parsed; the rest were ignored.
     ///

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **The HDMI Audio Data Block was misparsed, and `HdmiAudioBlock` changes with
+  display-types 0.5.** piaf read a multi-stream flag from an undefined bit and parsed
+  the rest as Short Audio Descriptors; the block holds a stream count, MS NonMixed
+  support, and 4-byte HDMI 3D Audio Descriptors followed by a 3D speaker allocation. It
+  is now parsed that way (as edid-decode and libdisplay-info do) into the new
+  `HdmiAudioBlock` fields (`max_streams`, `ms_non_mixed`, `audio_3d_descriptors`,
+  `speaker_allocation_3d`); `Audio3dChannels` and `Audio3dSpeakerAllocation` are
+  re-exported. New warnings: `EdidWarning::HdmiAudioNonMixedWithoutMultiStream`,
+  `HdmiAudio3dDescriptorsExceedBlock` (none taken), `HdmiAudio3dUnsupportedFormat` (that
+  descriptor skipped).
+
 ### Added
 
 - **Horizontal blanking on decoded modes.** `VideoMode::h_blank` (display-types 0.4.4) is

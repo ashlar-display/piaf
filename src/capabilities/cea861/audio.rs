@@ -59,6 +59,90 @@ pub(super) fn parse_audio_data_block(block_data: &[u8]) -> Vec<ShortAudioDescrip
     out
 }
 
+/// Parses an HDMI Audio Data Block payload (after the extended tag byte), as edid-decode
+/// (`cta_hdmi_audio_block`) and libdisplay-info (`parse_hdmi_audio_block`) decode it:
+///
+/// - byte 0: maximum stream count less one (bits 1:0), MS NonMixed support (bit 2);
+/// - byte 1: number of 3D audio descriptors (bits 2:0);
+/// - that many 4-byte 3D audio descriptors, then a 4-byte 3D speaker allocation.
+///
+/// Malformed content goes to `warn`: MS NonMixed with a single stream, more descriptors
+/// claimed than the block holds (then none are taken, as libdisplay-info does), and a 3D
+/// descriptor format other than L-PCM or One Bit Audio (that descriptor is skipped).
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub(super) fn parse_hdmi_audio_block(
+    payload: &[u8],
+    warn: &mut dyn FnMut(crate::model::diagnostics::EdidWarning),
+) -> display_types::cea861::HdmiAudioBlock {
+    use crate::model::diagnostics::EdidWarning;
+    use display_types::cea861::{
+        Audio3dChannels, Audio3dSpeakerAllocation, HdmiAudioBlock, SpeakerAllocation,
+        SpeakerAllocationFlags, SpeakerAllocationFlags2, SpeakerAllocationFlags3,
+    };
+
+    let first = payload.first().copied().unwrap_or(0);
+    let max_streams = (first & 0x03) + 1;
+    let ms_non_mixed = first & 0x04 != 0;
+    if ms_non_mixed && max_streams == 1 {
+        warn(EdidWarning::HdmiAudioNonMixedWithoutMultiStream);
+    }
+    let mut block = HdmiAudioBlock::new(max_streams, ms_non_mixed, Vec::new(), None);
+
+    let claimed = payload.get(1).map_or(0, |&b| b & 0x07);
+    if claimed == 0 {
+        return block;
+    }
+    let descriptors = payload.get(2..).unwrap_or(&[]);
+    // The 3D audio descriptors, then one speaker allocation descriptor.
+    if (usize::from(claimed) + 1) * 4 > descriptors.len() {
+        warn(EdidWarning::HdmiAudio3dDescriptorsExceedBlock {
+            claimed,
+            available_bytes: u8::try_from(descriptors.len()).unwrap_or(u8::MAX),
+        });
+        return block;
+    }
+    for d in descriptors.chunks_exact(4).take(usize::from(claimed)) {
+        let code = d[0] & 0x0F;
+        let (format, format_info) = match code {
+            1 => (
+                AudioFormat::Lpcm,
+                AudioFormatInfo::Lpcm {
+                    depth_16: d[3] & 0x01 != 0,
+                    depth_20: d[3] & 0x02 != 0,
+                    depth_24: d[3] & 0x04 != 0,
+                },
+            ),
+            9 => (AudioFormat::OneBitAudio, AudioFormatInfo::Raw(d[3])),
+            _ => {
+                warn(EdidWarning::HdmiAudio3dUnsupportedFormat { code });
+                continue;
+            }
+        };
+        block.audio_3d_descriptors.push(ShortAudioDescriptor::new(
+            format,
+            (d[1] & 0x1F) + 1,
+            AudioSampleRates::from_bits_truncate(d[2] & 0x7F),
+            format_info,
+        ));
+    }
+    let sa = &descriptors[usize::from(claimed) * 4..usize::from(claimed) * 4 + 4];
+    let channels = match sa[3] >> 4 {
+        1 => Audio3dChannels::Ch10_2,
+        2 => Audio3dChannels::Ch22_2,
+        3 => Audio3dChannels::Ch30_2,
+        other => Audio3dChannels::Unknown(other),
+    };
+    block.speaker_allocation_3d = Some(Audio3dSpeakerAllocation::new(
+        channels,
+        SpeakerAllocation::new(
+            SpeakerAllocationFlags::from_bits_truncate(sa[0]),
+            SpeakerAllocationFlags2::from_bits_truncate(sa[1]),
+            SpeakerAllocationFlags3::from_bits_truncate(sa[2]),
+        ),
+    ));
+    block
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
