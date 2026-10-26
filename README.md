@@ -220,7 +220,6 @@ modes are available through `capabilities_from_edid_static` at all build tiers.
 | `max_pixel_clock_mhz`               | `Option<u16>`                                               |
 | `timing_formula`                    | `Option<TimingFormula>`                                     |
 | `color_management`                  | `Option<ColorManagementData>`                               |
-| `warnings`                          | `[Option<EdidWarning>; 8]` (first 8; use `iter_warnings()`) |
 
 These fields are absent from `DisplayCapabilities` without `alloc` or `std`:
 
@@ -228,11 +227,13 @@ These fields are absent from `DisplayCapabilities` without `alloc` or `std`:
 |-------------------|--------------------------------------------------------------------------------|
 | `supported_modes` | Variable-length list of video modes                                            |
 | `extension_data`  | Type-erased handler data via `Arc<dyn ExtensionData>`                          |
-| `warnings` (full) | `Vec<ParseWarning>` in alloc builds; use `iter_warnings()` for portable access |
+| `warnings`        | `Vec<ParseWarning>`; type-erased handler warnings                              |
 
-**For supported modes without heap allocation**, use `capabilities_from_edid_static` instead.
-It returns `StaticDisplayCapabilities<N>`, which holds all the scalar fields above plus a
-fixed-capacity `[Option<VideoMode>; N]` array accessible via `iter_modes()`.
+**For supported modes and warnings without heap allocation**, use
+`capabilities_from_edid_static` instead. It returns `StaticDisplayCapabilities<N>`, which holds
+all the scalar fields above plus a fixed-capacity `[Option<VideoMode>; N]` array accessible via
+`iter_modes()`, and up to `MAX_STATIC_WARNINGS` (8) `EdidWarning`s through `warnings()` /
+`iter_warnings()`, with `warnings_dropped()` counting any that did not fit.
 
 Fixed-length string fields (`MonitorString`, `ManufacturerId`) use fixed-size byte
 array newtypes with `Display` and `Deref<Target = str>` impls, so they behave like

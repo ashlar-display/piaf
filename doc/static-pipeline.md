@@ -51,24 +51,26 @@ complement. Calling both on the same EDID will process extension blocks twice.
 ### `StaticDisplayCapabilities<const MAX_MODES: usize>`
 
 Contains all scalar fields from `DisplayCapabilities` (manufacturer, timings, chromaticity,
-etc.) plus fixed-capacity arrays for modes and warnings:
+etc.) plus a fixed-capacity array for modes and private, fixed-capacity warning storage:
 
 ```rust
 pub supported_modes: [Option<VideoMode>; MAX_MODES],
 pub num_modes: usize,
-pub warnings: [Option<EdidWarning>; 8],
-pub num_warnings: usize,
 ```
 
-Convenience iterators:
+Accessors:
 
 ```rust
 pub fn iter_modes(&self) -> impl Iterator<Item = &VideoMode>
+pub fn warnings(&self) -> &[EdidWarning]
 pub fn iter_warnings(&self) -> impl Iterator<Item = &EdidWarning>
+pub fn warnings_dropped(&self) -> u16
 ```
 
-Modes and warnings beyond capacity are silently dropped. 64 is a reasonable default for
-`MAX_MODES`; real displays rarely declare more than ~40 modes.
+Modes beyond capacity are silently dropped. 64 is a reasonable default for `MAX_MODES`;
+real displays rarely declare more than ~40 modes. Up to `MAX_STATIC_WARNINGS` (8) warnings
+are stored; `warnings_dropped()` counts the ones that did not fit (saturating at
+`u16::MAX`). The warning API is the same in every build.
 
 ### `StaticExtensionHandler`
 

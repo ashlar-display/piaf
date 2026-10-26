@@ -121,8 +121,8 @@ extend beyond the 8-bit range.
 ### `StaticDisplayCapabilities<const MAX_MODES: usize>` (static pipeline, all tiers)
 
 The output type for `capabilities_from_edid_static`. Contains all the same scalar fields as
-`DisplayCapabilities` (same names, same types), plus fixed-capacity arrays for modes and
-warnings:
+`DisplayCapabilities` (same names, same types), plus a fixed-capacity array for modes and
+private, fixed-capacity warning storage:
 
 ```rust
 pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
@@ -130,19 +130,22 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     pub manufacturer: Option<ManufacturerId>,
     // ...
 
-    // Mode and warning storage
+    // Mode storage
     pub supported_modes: [Option<VideoMode>; MAX_MODES],
     pub num_modes: usize,
-    pub warnings: [Option<EdidWarning>; 8],
-    pub num_warnings: usize,
+
+    // Warning storage (private; see the accessors below)
 }
 ```
 
-Access modes and warnings through iterators rather than indexing directly:
+Access modes through the iterator rather than indexing directly; warnings are only
+reachable through accessors, which are the same in every build:
 
 ```rust
 for mode in caps.iter_modes() { /* &VideoMode */ }
 for warn in caps.iter_warnings() { /* &EdidWarning */ }
+let all: &[EdidWarning] = caps.warnings();
+let lost: u16 = caps.warnings_dropped(); // beyond MAX_STATIC_WARNINGS (8)
 ```
 
 ### `VideoMode` construction
@@ -167,8 +170,8 @@ All other fields (`pixel_clock_khz`, `h_front_porch`, `h_sync_width`, etc.) defa
 `None` / `0` when not set via `with_detailed_timing`. This matches the sparse data available from non-DTD sources
 such as SVDs and standard timing entries.
 
-Modes and warnings beyond capacity are silently dropped — matching the existing 8-warning cap
-philosophy. 64 is a reasonable default for `MAX_MODES`.
+Modes beyond capacity are silently dropped. Warnings beyond `MAX_STATIC_WARNINGS` are not
+stored but counted in `warnings_dropped()`. 64 is a reasonable default for `MAX_MODES`.
 
 `StaticDisplayCapabilities` does not have an `extension_data` field. Rich extension metadata
 (audio, VSDB, colorimetry, HDR) is only available through the dynamic pipeline.
@@ -307,6 +310,7 @@ for w in caps.iter_warnings() {
 ```
 
 In bare `no_std` builds (without `alloc`) the warning list holds `EdidWarning` values
-directly (no type erasure), capped at 8 entries. The `iter_warnings()` method provides
-uniform access across both configurations.
+directly (no type erasure). `StaticDisplayCapabilities` stores up to
+`MAX_STATIC_WARNINGS` (8) and counts the rest in `warnings_dropped()`. The `iter_warnings()`
+method provides uniform access across both configurations.
 
