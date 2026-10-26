@@ -704,6 +704,75 @@ mod tests {
         );
     }
 
+    /// Collects what the no-alloc path emits.
+    #[derive(Default)]
+    struct Collect(Vec<EdidWarning>, Vec<VideoMode>);
+    impl ModeSink for Collect {
+        fn push_mode(&mut self, mode: VideoMode) {
+            self.1.push(mode);
+        }
+        fn push_warning(&mut self, w: EdidWarning) {
+            self.0.push(w);
+        }
+    }
+
+    fn edid_warnings(caps: &DisplayCapabilities) -> Vec<EdidWarning> {
+        caps.iter_warnings()
+            .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
+            .collect()
+    }
+
+    #[test]
+    fn test_cea_dtd_with_borders_warns_in_both_pipelines() {
+        let mut ext = [0u8; 128];
+        ext[2] = 4;
+        write_dtd_2560x1440_144(&mut ext, 4);
+        ext[4 + 15] = 8; // 8-pixel horizontal border: blanking 160 − 16 = 144
+        let ambiguous = EdidWarning::DtdBordersAmbiguous {
+            h_border: 8,
+            v_border: 0,
+        };
+
+        let mut caps = DisplayCapabilities::default();
+        ExtensionHandler::process(&Cea861Handler, &[&ext], &mut caps, &mut Vec::new());
+        assert_eq!(edid_warnings(&caps), [ambiguous]);
+        assert_eq!(caps.supported_modes[0].h_blank, Some(144));
+
+        let mut sink = Collect::default();
+        cea861_process_into_sink(&ext, &mut sink);
+        assert_eq!(sink.0, [ambiguous]);
+        assert_eq!(sink.1[0].h_blank, Some(144));
+    }
+
+    #[test]
+    fn test_vtb_ext_dtb_warnings_reach_both_pipelines() {
+        // Data block collection with one extended-tag block (VTB-EXT, 0x03): version 1, one
+        // Detailed Timing Block (1920×1080, blanking 280, border 4), no CVTs or STs.
+        let mut ext = [0u8; 128];
+        let payload_len = 1 + 4 + 18; // ext tag + header + DTB
+        ext[4] = (7 << 5) | payload_len as u8;
+        ext[5] = 0x03;
+        ext[6..10].copy_from_slice(&[0x01, 0x01, 0x00, 0x00]);
+        ext[10..28].copy_from_slice(&[
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0x00, 0, 0, 0, 4, 0, 0x1E,
+        ]);
+        ext[2] = (4 + 1 + payload_len) as u8; // DTDs (none) start after the collection
+        let ambiguous = EdidWarning::DtdBordersAmbiguous {
+            h_border: 4,
+            v_border: 0,
+        };
+
+        let mut caps = DisplayCapabilities::default();
+        ExtensionHandler::process(&Cea861Handler, &[&ext], &mut caps, &mut Vec::new());
+        assert_eq!(edid_warnings(&caps), [ambiguous]);
+        assert!(caps.supported_modes.iter().any(|m| m.h_blank == Some(272)));
+
+        let mut sink = Collect::default();
+        cea861_process_into_sink(&ext, &mut sink);
+        assert_eq!(sink.0, [ambiguous]);
+        assert!(sink.1.iter().any(|m| m.h_blank == Some(272)));
+    }
+
     #[test]
     fn test_cea_dtd_zero_clock_skipped() {
         // A DTD slot whose first two bytes are 0x00 is a monitor descriptor and must be skipped.

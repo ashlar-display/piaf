@@ -13,8 +13,11 @@ pub use display_types::{DisplayCapabilities, ExtensionData};
 /// [`ExtensionHandler`][crate::ExtensionHandler] and `StaticExtensionHandler` — write their output
 /// through this trait so the core parsing logic is shared across build configurations.
 pub trait ModeSink {
-    /// Push a decoded video mode. Duplicate modes (same width, height, refresh rate, and
-    /// interlace flag) are silently ignored.
+    /// Push a decoded video mode. Implementations ignore duplicates, but differ in what a
+    /// duplicate is: [`DisplayCapabilities`] drops only a mode equal in every field (so two
+    /// timings for the same resolution and rate are both kept), `StaticDisplayCapabilities`
+    /// any mode with the same width, height, refresh rate and interlace flag (the first
+    /// wins).
     fn push_mode(&mut self, mode: VideoMode);
     /// Push a non-fatal warning encountered while processing a block.
     fn push_warning(&mut self, w: EdidWarning);
@@ -62,8 +65,10 @@ impl ModeSink for StaticContext<'_> {
 
 /// `ModeSink` implementation for `DisplayCapabilities` (alloc/std builds only).
 ///
-/// `push_mode` deduplicates by (width, height, refresh_rate, interlaced) before appending.
-/// `push_warning` delegates to the inherent `push_warning` method from display-types.
+/// `push_mode` drops a mode equal in every field to one already present (full
+/// `PartialEq`, so modes with the same resolution and rate but different timing details
+/// are both kept). `push_warning` delegates to the inherent `push_warning` method from
+/// display-types.
 #[cfg(any(feature = "alloc", feature = "std"))]
 impl ModeSink for DisplayCapabilities {
     fn push_mode(&mut self, mode: VideoMode) {
