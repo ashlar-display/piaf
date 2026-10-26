@@ -142,6 +142,9 @@ pub fn capabilities_from_edid<T: EdidSource>(
 /// data (SVDs, DTDs, VTB-EXT timings) is extracted; rich metadata such as audio descriptors
 /// and colorimetry blocks requires the alloc pipeline.
 ///
+/// The result's warnings are the parser's (from
+/// [`EdidSource::edid_parse_warnings`]) first, then the base block's, then the handlers'.
+///
 /// This function is a replacement for [`capabilities_from_edid`], not a complement —
 /// calling both on the same EDID will process extension blocks twice.
 pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
@@ -154,6 +157,11 @@ pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
     let mut base_caps = DisplayCapabilities::default();
     // Initialised early so it can serve as the warning sink in bare no_std builds.
     let mut caps = StaticDisplayCapabilities::<N>::default();
+
+    // The parser's warnings first: they occurred before any block was decoded.
+    for warning in parsed.edid_parse_warnings() {
+        caps.push_warning(warning);
+    }
 
     #[cfg(any(feature = "alloc", feature = "std"))]
     {
@@ -317,5 +325,49 @@ mod tests {
             caps.iter_warnings().count(),
             dynamic.iter_warnings().count()
         );
+    }
+}
+
+// Builds in every configuration, so the bare no_std path is covered too.
+#[cfg(test)]
+mod static_tests {
+    use super::*;
+    use crate::model::diagnostics::EdidWarning;
+    use crate::model::extension::ExtensionTagRegistry;
+    use crate::parser::parse_edid;
+
+    // With the size mismatch, as many parse warnings as `ParsedEdidRef` holds in bare no_std.
+    const EXTENSIONS: usize = 7;
+
+    /// A base block with an all-zero (invalid) manufacturer ID and `EXTENSIONS` blocks with
+    /// the unknown tag `0x55`, followed by one stray byte.
+    fn edid_with_unknown_extensions() -> [u8; 128 * (1 + EXTENSIONS) + 1] {
+        let mut bytes = [0u8; 128 * (1 + EXTENSIONS) + 1];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[126] = EXTENSIONS as u8;
+        for (i, block) in bytes.chunks_exact_mut(128).enumerate() {
+            if i > 0 {
+                block[0] = 0x55;
+            }
+            let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            block[127] = 0u8.wrapping_sub(sum);
+        }
+        bytes
+    }
+
+    #[test]
+    fn test_static_pipeline_keeps_parse_warnings_first() {
+        let bytes = edid_with_unknown_extensions();
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        let mut expected = [EdidWarning::UnknownExtension(0x55); 8];
+        expected[0] = EdidWarning::SizeMismatch {
+            expected: 128 * (1 + EXTENSIONS),
+            actual: bytes.len(),
+        };
+        assert_eq!(caps.warnings(), expected);
+        // The base block's `InvalidManufacturerId` came after and did not fit.
+        assert_eq!(caps.warnings_dropped(), 1);
     }
 }

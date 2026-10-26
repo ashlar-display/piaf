@@ -1,8 +1,9 @@
 use piaf::{
     EdidWarning, ExtensionLibrary, ExtensionTagRegistry, KnownExtensions, MAX_STATIC_WARNINGS,
-    ModeSink, RefreshRate, STANDARD_HANDLERS, StaticDisplayCapabilities, capabilities_from_edid,
-    capabilities_from_edid_static, parse_edid,
+    ModeSink, ParsedEdid, RefreshRate, STANDARD_HANDLERS, StaticDisplayCapabilities,
+    capabilities_from_edid, capabilities_from_edid_static, parse_edid,
 };
+use std::sync::Arc;
 
 fn load(path: &str) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read fixture {path}: {e}"))
@@ -319,4 +320,61 @@ fn static_warnings_debug_omits_unused_slots() {
         "{debug}"
     );
     assert!(!debug.contains("DescriptorParseFailed"), "{debug}");
+}
+
+/// An EDID whose parse emits `SizeMismatch` (one stray byte) and `UnknownExtension(0x55)`;
+/// its all-zero manufacturer ID adds the base block's `InvalidManufacturerId`.
+fn edid_with_parse_warnings() -> Vec<u8> {
+    let mut bytes = edid_with_cea_vdb(&[16]);
+    bytes[128] = 0x55;
+    let ext_sum: u8 = bytes[128..255].iter().fold(0u8, |a, &x| a.wrapping_add(x));
+    bytes[255] = 0u8.wrapping_sub(ext_sum);
+    bytes.push(0);
+    bytes
+}
+
+const PARSE_THEN_BASE_WARNINGS: [EdidWarning; 3] = [
+    EdidWarning::SizeMismatch {
+        expected: 256,
+        actual: 257,
+    },
+    EdidWarning::UnknownExtension(0x55),
+    EdidWarning::InvalidManufacturerId,
+];
+
+/// The parser's warnings reach the static output, ahead of the base block's, from
+/// `ParsedEdidRef` and `ParsedEdid` alike, and match the dynamic pipeline's.
+#[test]
+fn static_pipeline_keeps_parse_warnings() {
+    let bytes = edid_with_parse_warnings();
+    let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+
+    let caps: StaticDisplayCapabilities<8> =
+        capabilities_from_edid_static(&parsed, STANDARD_HANDLERS);
+    assert_eq!(caps.warnings(), PARSE_THEN_BASE_WARNINGS);
+
+    let dynamic = capabilities_from_edid(&parsed, &ExtensionLibrary::with_standard_handlers());
+    let dynamic: Vec<EdidWarning> = dynamic
+        .iter_warnings()
+        .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
+        .collect();
+    assert_eq!(dynamic, PARSE_THEN_BASE_WARNINGS);
+
+    let owned = ParsedEdid::from(parsed);
+    let caps: StaticDisplayCapabilities<8> =
+        capabilities_from_edid_static(&owned, STANDARD_HANDLERS);
+    assert_eq!(caps.warnings(), PARSE_THEN_BASE_WARNINGS);
+}
+
+/// A parse warning of a type other than `EdidWarning` has no place in the static output.
+#[test]
+fn static_pipeline_skips_foreign_parse_warnings() {
+    let bytes = edid_with_parse_warnings();
+    let mut owned = ParsedEdid::from(parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap());
+    owned.warnings.insert(0, Arc::new(std::fmt::Error));
+
+    let caps: StaticDisplayCapabilities<8> =
+        capabilities_from_edid_static(&owned, STANDARD_HANDLERS);
+    assert_eq!(caps.warnings(), PARSE_THEN_BASE_WARNINGS);
+    assert_eq!(caps.warnings_dropped(), 0);
 }

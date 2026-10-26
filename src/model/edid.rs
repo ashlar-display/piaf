@@ -1,6 +1,5 @@
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::capabilities::DisplayCapabilities;
-#[cfg(not(any(feature = "alloc", feature = "std")))]
 use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
@@ -34,6 +33,26 @@ pub trait EdidSource {
     /// override it in `alloc`/`std` builds to propagate their stored warnings.
     #[cfg(any(feature = "alloc", feature = "std"))]
     fn propagate_parse_warnings(&self, _caps: &mut DisplayCapabilities) {}
+
+    /// Parse-phase warnings as [`EdidWarning`]s, in the order they occurred.
+    ///
+    /// Read by [`capabilities_from_edid_static`][crate::capabilities_from_edid_static],
+    /// which stores them ahead of the base block's and the handlers' warnings. A stored
+    /// warning of another type (a `ParseWarning` a caller added to `ParsedEdid::warnings`)
+    /// cannot be held by [`StaticDisplayCapabilities`][crate::StaticDisplayCapabilities]
+    /// and is not yielded. The default implementation yields nothing; [`ParsedEdid`] and
+    /// [`ParsedEdidRef`] override it to yield their stored warnings.
+    fn edid_parse_warnings(&self) -> impl Iterator<Item = EdidWarning> + '_ {
+        core::iter::empty()
+    }
+}
+
+/// The [`EdidWarning`]s among `warnings`, skipping warnings of other types.
+#[cfg(any(feature = "alloc", feature = "std"))]
+fn edid_warnings(warnings: &[ParseWarning]) -> impl Iterator<Item = EdidWarning> + '_ {
+    warnings
+        .iter()
+        .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
 }
 
 /// The owned output of [`parse_edid_owned`][crate::parse_edid_owned].
@@ -76,6 +95,18 @@ impl EdidSource for ParsedEdid {
     #[cfg(any(feature = "alloc", feature = "std"))]
     fn propagate_parse_warnings(&self, caps: &mut DisplayCapabilities) {
         caps.warnings.extend(self.warnings.iter().cloned());
+    }
+
+    fn edid_parse_warnings(&self) -> impl Iterator<Item = EdidWarning> + '_ {
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        {
+            edid_warnings(&self.warnings)
+        }
+        // Bare `no_std` `ParsedEdid` stores no warnings.
+        #[cfg(not(any(feature = "alloc", feature = "std")))]
+        {
+            core::iter::empty()
+        }
     }
 }
 
@@ -148,6 +179,17 @@ impl<'a> EdidSource for ParsedEdidRef<'a> {
     #[cfg(any(feature = "alloc", feature = "std"))]
     fn propagate_parse_warnings(&self, caps: &mut DisplayCapabilities) {
         caps.warnings.extend(self.warnings.iter().cloned());
+    }
+
+    fn edid_parse_warnings(&self) -> impl Iterator<Item = EdidWarning> + '_ {
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        {
+            edid_warnings(&self.warnings)
+        }
+        #[cfg(not(any(feature = "alloc", feature = "std")))]
+        {
+            self.iter_warnings().copied()
+        }
     }
 }
 
