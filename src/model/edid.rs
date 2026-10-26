@@ -4,7 +4,8 @@ use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::prelude::Vec;
+use crate::model::prelude::{Arc, Vec};
+use crate::model::warnings::ParseWarnings;
 
 pub use display_types::EdidVersion;
 
@@ -131,17 +132,8 @@ pub struct ParsedEdidRef<'a> {
     pub(crate) raw_extensions: &'a [u8],
     /// Number of validated extension blocks.
     pub num_extensions: usize,
-    /// Non-fatal conditions encountered during parsing (`alloc`/`std`).
-    /// Use [`iter_warnings`][Self::iter_warnings] for portable access.
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    pub warnings: Vec<ParseWarning>,
-    /// Non-fatal conditions encountered during parsing (bare `no_std`).
-    /// Use [`iter_warnings`][Self::iter_warnings].
-    #[cfg(not(any(feature = "alloc", feature = "std")))]
-    pub warnings: [Option<EdidWarning>; 8],
-    /// Number of valid entries in `warnings` (bare `no_std`).
-    #[cfg(not(any(feature = "alloc", feature = "std")))]
-    pub num_warnings: usize,
+    // Non-fatal conditions encountered during parsing.
+    pub(crate) warnings: ParseWarnings,
 }
 
 impl<'a> ParsedEdidRef<'a> {
@@ -154,16 +146,22 @@ impl<'a> ParsedEdidRef<'a> {
         self.raw_extensions.get(start..start + 128)?.try_into().ok()
     }
 
-    /// Iterates non-fatal parse warnings (`alloc`/`std`).
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    pub fn iter_warnings(&self) -> impl Iterator<Item = &ParseWarning> {
-        self.warnings.iter()
+    /// The non-fatal conditions encountered during parsing, in the order they occurred.
+    pub fn warnings(&self) -> &[EdidWarning] {
+        self.warnings.as_slice()
     }
 
-    /// Iterates non-fatal parse warnings (bare `no_std`).
-    #[cfg(not(any(feature = "alloc", feature = "std")))]
+    /// Iterates the non-fatal conditions encountered during parsing, in the order they
+    /// occurred.
     pub fn iter_warnings(&self) -> impl Iterator<Item = &EdidWarning> {
-        self.warnings[..self.num_warnings].iter().flatten()
+        self.warnings().iter()
+    }
+
+    /// The number of warnings that did not fit (saturating at `u16::MAX`): without `alloc`
+    /// the parser stores up to [`MAX_PARSE_WARNINGS`][crate::parser::MAX_PARSE_WARNINGS].
+    /// Always 0 with `alloc`.
+    pub fn warnings_dropped(&self) -> u16 {
+        self.warnings.dropped()
     }
 }
 
@@ -178,18 +176,14 @@ impl<'a> EdidSource for ParsedEdidRef<'a> {
 
     #[cfg(any(feature = "alloc", feature = "std"))]
     fn propagate_parse_warnings(&self, caps: &mut DisplayCapabilities) {
-        caps.warnings.extend(self.warnings.iter().cloned());
+        for &w in self.warnings() {
+            // The inherent `DisplayCapabilities::push_warning`, which wraps it in an `Arc`.
+            caps.push_warning(w);
+        }
     }
 
     fn edid_parse_warnings(&self) -> impl Iterator<Item = EdidWarning> + '_ {
-        #[cfg(any(feature = "alloc", feature = "std"))]
-        {
-            edid_warnings(&self.warnings)
-        }
-        #[cfg(not(any(feature = "alloc", feature = "std")))]
-        {
-            self.iter_warnings().copied()
-        }
+        self.warnings().iter().copied()
     }
 }
 
@@ -205,7 +199,11 @@ impl<'a> From<ParsedEdidRef<'a>> for ParsedEdid {
                 .filter_map(|i| r.extension_block(i))
                 .copied()
                 .collect(),
-            warnings: r.warnings,
+            warnings: r
+                .warnings()
+                .iter()
+                .map(|&w| -> ParseWarning { Arc::new(w) })
+                .collect(),
         }
     }
 }

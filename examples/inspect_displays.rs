@@ -970,8 +970,8 @@ fn main() {
                                 }
                             }
 
-                            if !parsed.warnings.is_empty() {
-                                println!("  Parse warnings: {:?}", parsed.warnings);
+                            if !parsed.warnings().is_empty() {
+                                println!("  Parse warnings: {:?}", parsed.warnings());
                             }
                         }
                         Err(e) => {

@@ -20,6 +20,9 @@ pub mod diagnostics;
 pub use diagnostics::ParseWarning;
 pub use diagnostics::{EdidError, EdidWarning};
 
+/// Private warning storage.
+pub(crate) mod warnings;
+
 /// Parsed EDID intermediate representation.
 pub mod edid;
 pub use edid::{EdidSource, EdidVersion, ParsedEdid, ParsedEdidRef};

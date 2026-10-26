@@ -1,5 +1,6 @@
 use crate::model::diagnostics::EdidWarning;
 use crate::model::manufacture::{ManufacturerId, MonitorString};
+use crate::model::warnings::InlineWarnings;
 
 pub use display_types::{
     CvtAlgorithm, ModeSource, RefreshRate, StereoMode, SyncDefinition, TypeIxStereoMode, VideoMode,
@@ -242,57 +243,12 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     /// Number of valid entries in [`supported_modes`][Self::supported_modes].
     pub num_modes: usize,
     // Non-fatal conditions collected from the parser and all handlers.
-    warnings: StaticWarnings,
+    warnings: InlineWarnings<MAX_STATIC_WARNINGS>,
 }
 
 /// The number of warnings a [`StaticDisplayCapabilities`] stores; further warnings are
 /// counted in [`warnings_dropped`][StaticDisplayCapabilities::warnings_dropped].
 pub const MAX_STATIC_WARNINGS: usize = 8;
-
-// Fills the unused warning slots; never returned (`as_slice()` stops at `len`).
-const PLACEHOLDER_WARNING: EdidWarning = EdidWarning::DescriptorParseFailed;
-
-// Inline warning storage: the first `len` entries are real, the rest are
-// `PLACEHOLDER_WARNING`, so the warnings can be returned as a slice.
-#[derive(Clone)]
-struct StaticWarnings {
-    items: [EdidWarning; MAX_STATIC_WARNINGS],
-    len: usize,
-    dropped: u16,
-}
-
-impl StaticWarnings {
-    const fn new() -> Self {
-        Self {
-            items: [PLACEHOLDER_WARNING; MAX_STATIC_WARNINGS],
-            len: 0,
-            dropped: 0,
-        }
-    }
-
-    fn as_slice(&self) -> &[EdidWarning] {
-        &self.items[..self.len]
-    }
-
-    fn push(&mut self, w: EdidWarning) {
-        if self.len < MAX_STATIC_WARNINGS {
-            self.items[self.len] = w;
-            self.len += 1;
-        } else {
-            self.dropped = self.dropped.saturating_add(1);
-        }
-    }
-}
-
-// By hand, so that it prints the warnings in use, never the unused slots.
-impl core::fmt::Debug for StaticWarnings {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("StaticWarnings")
-            .field("items", &self.as_slice())
-            .field("dropped", &self.dropped)
-            .finish()
-    }
-}
 
 impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
     fn default() -> Self {
@@ -347,7 +303,7 @@ impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
             // `core::array::from_fn` constructs each slot individually.
             supported_modes: core::array::from_fn(|_| None),
             num_modes: 0,
-            warnings: StaticWarnings::new(),
+            warnings: InlineWarnings::new(),
         }
     }
 }
@@ -371,7 +327,7 @@ impl<const MAX_MODES: usize> StaticDisplayCapabilities<MAX_MODES> {
     /// The number of warnings that did not fit in the [`MAX_STATIC_WARNINGS`] slots
     /// (saturating at `u16::MAX`).
     pub fn warnings_dropped(&self) -> u16 {
-        self.warnings.dropped
+        self.warnings.dropped()
     }
 }
 

@@ -1,11 +1,8 @@
 use crate::model::diagnostics::EdidError;
 use crate::model::diagnostics::EdidWarning;
-#[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::diagnostics::ParseWarning;
 use crate::model::edid::{ParsedEdid, ParsedEdidRef};
 use crate::model::extension::KnownExtensions;
-#[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::prelude::{Arc, Vec};
+use crate::model::warnings::ParseWarnings;
 
 /// The fixed 8-byte magic header at offset 0 of every valid EDID block.
 pub const EDID_HEADER: [u8; 8] = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00];
@@ -16,6 +13,11 @@ pub const EDID_HEADER: [u8; 8] = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00
 /// Inputs claiming more than this limit are most likely malformed or hostile; the parser
 /// emits [`EdidWarning::ExtensionBlockLimitReached`] and ignores the excess blocks.
 pub const MAX_EXTENSION_BLOCKS: usize = 64;
+
+/// The number of warnings [`parse_edid`] stores in a [`ParsedEdidRef`] without `alloc`;
+/// further warnings are counted in
+/// [`warnings_dropped`][ParsedEdidRef::warnings_dropped]. With `alloc` every warning is kept.
+pub const MAX_PARSE_WARNINGS: usize = 8;
 
 /// Validates a raw EDID byte slice and returns a zero-copy [`ParsedEdidRef`] borrowing
 /// directly from `bytes`.
@@ -64,43 +66,20 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
         return Err(EdidError::InvalidLength);
     }
 
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    let mut warnings: Vec<ParseWarning> = Vec::new();
-    #[cfg(not(any(feature = "alloc", feature = "std")))]
-    let mut warnings: [Option<EdidWarning>; 8] = [None; 8];
-    #[cfg(not(any(feature = "alloc", feature = "std")))]
-    let mut num_warnings: usize = 0;
+    let mut warnings = ParseWarnings::default();
 
     if bytes.len() > total_required {
-        #[cfg(any(feature = "alloc", feature = "std"))]
-        warnings.push(Arc::new(EdidWarning::SizeMismatch {
+        warnings.push(EdidWarning::SizeMismatch {
             expected: total_required,
             actual: bytes.len(),
-        }));
-        #[cfg(not(any(feature = "alloc", feature = "std")))]
-        if num_warnings < 8 {
-            warnings[num_warnings] = Some(EdidWarning::SizeMismatch {
-                expected: total_required,
-                actual: bytes.len(),
-            });
-            num_warnings += 1;
-        }
+        });
     }
 
     let blocks_to_parse = if extension_count > MAX_EXTENSION_BLOCKS {
-        #[cfg(any(feature = "alloc", feature = "std"))]
-        warnings.push(Arc::new(EdidWarning::ExtensionBlockLimitReached {
+        warnings.push(EdidWarning::ExtensionBlockLimitReached {
             declared: extension_count,
             limit: MAX_EXTENSION_BLOCKS,
-        }));
-        #[cfg(not(any(feature = "alloc", feature = "std")))]
-        if num_warnings < 8 {
-            warnings[num_warnings] = Some(EdidWarning::ExtensionBlockLimitReached {
-                declared: extension_count,
-                limit: MAX_EXTENSION_BLOCKS,
-            });
-            num_warnings += 1;
-        }
+        });
         MAX_EXTENSION_BLOCKS
     } else {
         extension_count
@@ -115,13 +94,7 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
         }
         let tag = ext_block[0];
         if !tags.is_known(tag) {
-            #[cfg(any(feature = "alloc", feature = "std"))]
-            warnings.push(Arc::new(EdidWarning::UnknownExtension(tag)));
-            #[cfg(not(any(feature = "alloc", feature = "std")))]
-            if num_warnings < 8 {
-                warnings[num_warnings] = Some(EdidWarning::UnknownExtension(tag));
-                num_warnings += 1;
-            }
+            warnings.push(EdidWarning::UnknownExtension(tag));
         }
     }
 
@@ -132,8 +105,6 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
         raw_extensions,
         num_extensions: blocks_to_parse,
         warnings,
-        #[cfg(not(any(feature = "alloc", feature = "std")))]
-        num_warnings,
     })
 }
 
@@ -241,7 +212,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(feature = "alloc", feature = "std"))]
     fn test_parse_unknown_extension_warning() {
         let mut bytes = [0u8; 256];
         bytes[0..8].copy_from_slice(&EDID_HEADER);
@@ -256,15 +226,10 @@ mod tests {
         let result = parse_edid(&bytes, &registry);
         assert!(result.is_ok());
         let parsed = result.unwrap();
-        assert_eq!(parsed.warnings.len(), 1);
-        assert_eq!(
-            (*parsed.warnings[0]).downcast_ref::<EdidWarning>(),
-            Some(&EdidWarning::UnknownExtension(0xEE))
-        );
+        assert_eq!(parsed.warnings(), [EdidWarning::UnknownExtension(0xEE)]);
     }
 
     #[test]
-    #[cfg(any(feature = "alloc", feature = "std"))]
     fn test_parse_trailing_bytes_warns() {
         // 256-byte buffer but extension_count = 0 → expected 128, actual 256
         let mut bytes = [0u8; 256];
@@ -274,13 +239,12 @@ mod tests {
         let result = parse_edid(&bytes, &registry);
         assert!(result.is_ok());
         let parsed = result.unwrap();
-        assert_eq!(parsed.warnings.len(), 1);
         assert_eq!(
-            (*parsed.warnings[0]).downcast_ref::<EdidWarning>(),
-            Some(&EdidWarning::SizeMismatch {
+            parsed.warnings(),
+            [EdidWarning::SizeMismatch {
                 expected: 128,
                 actual: 256
-            })
+            }]
         );
     }
 
@@ -301,13 +265,12 @@ mod tests {
         let result = parse_edid(&bytes, &registry);
         assert!(result.is_ok());
         let parsed = result.unwrap();
-        assert_eq!(parsed.warnings.len(), 0); // Should be known
+        assert!(parsed.warnings().is_empty()); // Should be known
         assert_eq!(parsed.num_extensions, 1);
         assert_eq!(parsed.extension_block(0).unwrap()[0], 0x70);
     }
 
     #[test]
-    #[cfg(any(feature = "alloc", feature = "std"))]
     fn test_custom_extension_registration() {
         let mut bytes = [0u8; 256];
         bytes[0..8].copy_from_slice(&EDID_HEADER);
@@ -327,18 +290,16 @@ mod tests {
         let parsed = result.unwrap();
 
         // Should NOT have a warning because it was registered
-        assert_eq!(parsed.warnings.len(), 0);
+        assert!(parsed.warnings().is_empty());
         assert_eq!(parsed.num_extensions, 1);
         assert_eq!(parsed.extension_block(0).unwrap()[0], custom_tag);
     }
 
     #[test]
-    #[cfg(any(feature = "alloc", feature = "std"))]
     fn test_extension_block_limit() {
         // Build an EDID that declares MAX_EXTENSION_BLOCKS + 1 extension blocks.
         let declared = MAX_EXTENSION_BLOCKS + 1;
-        let total_bytes = 128 * (1 + declared);
-        let mut bytes = vec![0u8; total_bytes];
+        let mut bytes = [0u8; 128 * (2 + MAX_EXTENSION_BLOCKS)];
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[126] = declared as u8;
 
@@ -355,13 +316,44 @@ mod tests {
         let parsed = parse_edid(&bytes, &registry).unwrap();
 
         assert_eq!(parsed.num_extensions, MAX_EXTENSION_BLOCKS);
-        assert!(parsed.warnings.iter().any(|w| {
-            (*w).downcast_ref::<EdidWarning>()
-                == Some(&EdidWarning::ExtensionBlockLimitReached {
-                    declared,
-                    limit: MAX_EXTENSION_BLOCKS,
-                })
+        assert!(parsed.iter_warnings().any(|w| {
+            *w == EdidWarning::ExtensionBlockLimitReached {
+                declared,
+                limit: MAX_EXTENSION_BLOCKS,
+            }
         }));
+    }
+
+    /// Without alloc the parser keeps `MAX_PARSE_WARNINGS` and counts the rest; with alloc
+    /// it keeps them all.
+    #[test]
+    fn test_parse_warnings_beyond_capacity_are_counted() {
+        const EXTENSIONS: usize = MAX_PARSE_WARNINGS + 2;
+        let mut bytes = [0u8; 128 * (1 + EXTENSIONS)];
+        bytes[0..8].copy_from_slice(&EDID_HEADER);
+        bytes[126] = EXTENSIONS as u8;
+        for (i, block) in bytes.chunks_exact_mut(128).enumerate() {
+            if i > 0 {
+                block[0] = i as u8; // unknown tags 0x01..
+            }
+            let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            block[127] = 0u8.wrapping_sub(sum);
+        }
+
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        let (stored, dropped) = (EXTENSIONS, 0);
+        #[cfg(not(any(feature = "alloc", feature = "std")))]
+        let (stored, dropped) = (MAX_PARSE_WARNINGS, 2);
+        assert_eq!(parsed.warnings().len(), stored);
+        assert!(
+            parsed
+                .iter_warnings()
+                .zip(1u8..)
+                .all(|(w, tag)| *w == EdidWarning::UnknownExtension(tag))
+        );
+        assert_eq!(parsed.warnings_dropped(), dropped);
     }
 
     #[test]
