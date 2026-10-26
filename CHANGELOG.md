@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`capabilities_from_edid_static` dropped the base block's warnings in alloc builds**
+  (bare `no_std` builds kept them): `DtdPixelClockOverflow`, the DTD border warnings and
+  the rest now reach the static output in every build.
 - **Detailed Timing Blocks in a VESA Video Timing Block Extension** (CTA extended tag
   0x03) were decoded by a separate decoder that kept only the resolution, refresh rate
   and interlace flag. They now go through the same decoder as every other DTD, with the

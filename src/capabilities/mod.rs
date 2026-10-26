@@ -159,8 +159,15 @@ pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
         let mut w: Vec<ParseWarning> = Vec::new();
         base::BaseBlockHandler.process(&[parsed.base_block()], &mut base_caps, &mut w);
         // base_caps now holds scalar fields, preferred_image_size_mm, and supported_modes.
-        // Handler-level warnings in `w` (Arc-boxed) are not copied to the static output;
-        // use capabilities_from_edid if full warning detail is needed.
+        // The base block's warnings are `EdidWarning`s behind `Arc<dyn Error>`; copy them
+        // into the static output, as the bare no_std path below records them directly.
+        for warning in base_caps.warnings.iter().chain(w.iter()) {
+            if let Some(&edid_warning) =
+                (**warning).downcast_ref::<crate::model::diagnostics::EdidWarning>()
+            {
+                caps.push_warning(edid_warning);
+            }
+        }
     }
 
     #[cfg(not(any(feature = "alloc", feature = "std")))]
@@ -277,5 +284,36 @@ mod tests {
         let caps = capabilities_from_edid(&parsed, &ExtensionLibrary::with_standard_handlers());
 
         assert!(caps.digital);
+    }
+
+    /// The static pipeline keeps the base block's warnings in alloc builds too (it used to
+    /// drop them there, while bare no_std builds kept them).
+    #[test]
+    fn test_static_pipeline_keeps_base_block_warnings() {
+        use crate::model::diagnostics::EdidWarning;
+        let mut bytes = [0u8; 128];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x14] = 0x80;
+        // DTD at 0x36: 1920×1080, 148.50 MHz, blanking 280 × 45, borders 8 / 2.
+        bytes[0x36..0x48].copy_from_slice(&[
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0x00, 0, 0, 0, 8, 2, 0x1E,
+        ]);
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+        assert!(caps.iter_warnings().any(|w| matches!(
+            w,
+            EdidWarning::DtdBordersAmbiguous {
+                h_border: 8,
+                v_border: 2
+            }
+        )));
+        let dynamic = capabilities_from_edid(&parsed, &ExtensionLibrary::with_standard_handlers());
+        assert_eq!(
+            caps.iter_warnings().count(),
+            dynamic.iter_warnings().count()
+        );
     }
 }
