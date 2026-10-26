@@ -1,6 +1,6 @@
 use piaf::{
-    EdidWarning, ExtensionLibrary, ExtensionTagRegistry, KnownExtensions, RefreshRate,
-    STANDARD_HANDLERS, StaticDisplayCapabilities, capabilities_from_edid,
+    EdidWarning, ExtensionLibrary, ExtensionTagRegistry, KnownExtensions, MAX_STATIC_WARNINGS,
+    ModeSink, RefreshRate, STANDARD_HANDLERS, StaticDisplayCapabilities, capabilities_from_edid,
     capabilities_from_edid_static, parse_edid,
 };
 
@@ -274,4 +274,49 @@ fn test_static_same_modes_as_alloc() {
         alloc_modes, static_modes,
         "alloc and static pipelines produced different mode lists"
     );
+}
+
+// --- Warning storage ---
+
+#[test]
+fn static_warnings_beyond_capacity_are_counted() {
+    let mut caps = StaticDisplayCapabilities::<4>::default();
+    assert!(caps.warnings().is_empty());
+    assert_eq!(caps.warnings_dropped(), 0);
+
+    for tag in 0..(MAX_STATIC_WARNINGS as u8 + 2) {
+        caps.push_warning(EdidWarning::UnknownExtension(tag));
+    }
+
+    let expected: Vec<EdidWarning> = (0..MAX_STATIC_WARNINGS as u8)
+        .map(EdidWarning::UnknownExtension)
+        .collect();
+    assert_eq!(caps.warnings(), expected.as_slice());
+    assert!(caps.iter_warnings().eq(expected.iter()));
+    assert_eq!(caps.warnings_dropped(), 2);
+}
+
+#[test]
+fn static_warnings_dropped_saturates() {
+    let mut caps = StaticDisplayCapabilities::<4>::default();
+    for _ in 0..(MAX_STATIC_WARNINGS + u16::MAX as usize + 1) {
+        caps.push_warning(EdidWarning::DescriptorParseFailed);
+    }
+    assert_eq!(caps.warnings().len(), MAX_STATIC_WARNINGS);
+    assert_eq!(caps.warnings_dropped(), u16::MAX);
+}
+
+/// The unused slots hold a placeholder warning; `Debug` must not print it.
+#[test]
+fn static_warnings_debug_omits_unused_slots() {
+    let mut caps = StaticDisplayCapabilities::<4>::default();
+    assert!(!format!("{caps:?}").contains("DescriptorParseFailed"));
+
+    caps.push_warning(EdidWarning::UnknownExtension(0x42));
+    let debug = format!("{caps:?}");
+    assert!(
+        debug.contains("items: [UnknownExtension(66)], dropped: 0"),
+        "{debug}"
+    );
+    assert!(!debug.contains("DescriptorParseFailed"), "{debug}");
 }
