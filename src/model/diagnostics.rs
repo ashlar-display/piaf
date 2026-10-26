@@ -52,8 +52,9 @@ pub enum EdidWarning {
     /// reads them that way: the line total is active + blanking, and
     /// [`VideoMode::h_blank`][crate::VideoMode::h_blank] is the blanking minus both
     /// borders. Under the 1.4 reading the blanking would be 2 × `h_border` larger, and the
-    /// refresh rate lower, at the same pixel clock. When the blanking is smaller than both
-    /// borders together, no reading fits and `h_blank` is left `None`.
+    /// refresh rate lower, at the same pixel clock. When the 1.3 reading leaves less than
+    /// the front porch and sync pulse, `h_blank` is left `None` and
+    /// [`DtdBlankingInconsistent`][EdidWarning::DtdBlankingInconsistent] follows.
     #[error(
         "DTD has non-zero borders ({h_border} pixels, {v_border} lines); its blanking is read as including them (EDID 1.3)"
     )]
@@ -62,6 +63,28 @@ pub enum EdidWarning {
         h_border: u8,
         /// Vertical border on each side, in lines (byte 16).
         v_border: u8,
+    },
+    /// A Detailed Timing Descriptor's horizontal blanking, less both borders (the EDID 1.3
+    /// reading piaf takes), is smaller than its front porch plus sync pulse: that reading is
+    /// impossible. The mode is kept with [`VideoMode::h_blank`][crate::VideoMode::h_blank]
+    /// left `None`.
+    ///
+    /// Without borders the descriptor is malformed. With borders, the EDID 1.4 reading
+    /// (blanking excluding the borders, so `h_blank` = `blanking`) may still hold; piaf does
+    /// not switch to it, because the refresh rate and the mode's identity depend on the
+    /// reading too. The raw values are here for a caller that wants to apply it.
+    #[error(
+        "DTD blanking {blanking} less 2 × border {h_border} cannot hold front porch {h_front_porch} and sync {h_sync_width}; h_blank left unset"
+    )]
+    DtdBlankingInconsistent {
+        /// Horizontal blanking as stored in the descriptor, in pixels.
+        blanking: u16,
+        /// Horizontal border on each side, in pixels.
+        h_border: u8,
+        /// Horizontal front porch, in pixels.
+        h_front_porch: u16,
+        /// Horizontal sync pulse width, in pixels.
+        h_sync_width: u16,
     },
     /// The number of extension blocks declared in the base block exceeds the parser's
     /// safety limit. Only the first `limit` blocks were parsed; the rest were ignored.

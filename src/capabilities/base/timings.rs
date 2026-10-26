@@ -67,8 +67,8 @@ pub(super) fn decode_standard_timings(base: &[u8; 128], sink: &mut dyn ModeSink)
 
 /// Parses a single 18-byte DTD slice into a `VideoMode`.
 ///
-/// Non-fatal findings about a decoded mode (currently
-/// [`EdidWarning::DtdBordersAmbiguous`]) go to `warn`; the mode is still returned.
+/// Non-fatal findings about a decoded mode ([`EdidWarning::DtdBordersAmbiguous`],
+/// [`EdidWarning::DtdBlankingInconsistent`]) go to `warn`; the mode is still returned.
 ///
 /// Returns:
 /// - `Ok(None)` — monitor descriptor (zero pixel clock) or undecodable geometry
@@ -123,11 +123,23 @@ pub(crate) fn build_dtd_mode(
 
     // EDID 1.3 §3.12 counts the borders in the blanking, EDID 1.4 §3.12 does not; EDIDs in
     // practice follow 1.3, and so does the refresh rate above (line total = active +
-    // blanking). `VideoMode::h_blank` excludes the borders, so both come off.
+    // blanking). `VideoMode::h_blank` excludes the borders, so both come off. What is left
+    // must still hold the front porch and the sync pulse; when it does not, the 1.3
+    // reading is impossible and `h_blank` is not guessed.
     if h_border != 0 || v_border != 0 {
         warn(EdidWarning::DtdBordersAmbiguous { h_border, v_border });
     }
-    let h_blank = hblank.checked_sub(2 * u16::from(h_border));
+    let h_blank = hblank
+        .checked_sub(2 * u16::from(h_border))
+        .filter(|&b| b >= h_front_porch + h_sync_width);
+    if h_blank.is_none() {
+        warn(EdidWarning::DtdBlankingInconsistent {
+            blanking: hblank,
+            h_border,
+            h_front_porch,
+            h_sync_width,
+        });
+    }
 
     // Stereo (byte 17 bits 6, 5, and 0 — non-contiguous three-bit code).
     let stereo = match ((dtd[17] >> 5) & 0x03, dtd[17] & 0x01) {
@@ -238,12 +250,7 @@ pub(crate) fn decode_dtd_slot(dtd: &[u8], caps: &mut DisplayCapabilities, dtd_in
 /// This is `pub(crate)` so that the CEA-861 handler can use it for DTDs in extension blocks
 /// in no-alloc builds.
 pub(crate) fn decode_dtd_slot_into_sink(dtd: &[u8], sink: &mut dyn ModeSink, dtd_index: u8) {
-    let mut found = None;
-    let built = build_dtd_mode(dtd, &mut |w| found = Some(w));
-    if let Some(w) = found {
-        sink.push_warning(w);
-    }
-    match built {
+    match build_dtd_mode(dtd, &mut |w| sink.push_warning(w)) {
         Err(w) => sink.push_warning(w),
         Ok(None) => {}
         Ok(Some(mode)) => sink.push_mode(mode.with_source(ModeSource::DtdIndex(dtd_index))),
@@ -616,6 +623,74 @@ mod tests {
         let caps = decode_base(&base_with_bordered_1080p(150, 0));
         assert_eq!(caps.supported_modes[0].h_blank, None);
         assert_eq!(borders_warnings(&caps).len(), 1);
+    }
+
+    fn inconsistent_warnings(caps: &DisplayCapabilities) -> Vec<EdidWarning> {
+        caps.iter_warnings()
+            .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
+            .filter(|w| matches!(w, EdidWarning::DtdBlankingInconsistent { .. }))
+            .collect()
+    }
+
+    #[test]
+    fn test_dtd_border_boundary_against_porch_and_sync() {
+        // Blanking 280, front porch 88, sync 44: the 1.3 reading needs 280 − 2b ≥ 132.
+        let caps = decode_base(&base_with_bordered_1080p(74, 0)); // 280 − 148 = 132
+        assert_eq!(caps.supported_modes[0].h_blank, Some(132));
+        assert!(inconsistent_warnings(&caps).is_empty());
+
+        let caps = decode_base(&base_with_bordered_1080p(75, 0)); // 280 − 150 = 130
+        assert_eq!(caps.supported_modes[0].h_blank, None);
+        assert_eq!(
+            inconsistent_warnings(&caps),
+            [EdidWarning::DtdBlankingInconsistent {
+                blanking: 280,
+                h_border: 75,
+                h_front_porch: 88,
+                h_sync_width: 44
+            }]
+        );
+        // Both warnings: the borders are ambiguous, and the 1.3 reading impossible.
+        assert_eq!(borders_warnings(&caps).len(), 1);
+    }
+
+    #[test]
+    fn test_dtd_without_borders_but_blanking_too_short() {
+        // Front porch 200 + sync 100 in a blanking of 280: malformed, h_blank not guessed.
+        let mut base = base_with_bordered_1080p(0, 0);
+        base[0x3E] = 200;
+        base[0x3F] = 100;
+        let caps = decode_base(&base);
+        assert_eq!(caps.supported_modes[0].h_blank, None);
+        assert_eq!(inconsistent_warnings(&caps).len(), 1);
+        assert!(borders_warnings(&caps).is_empty());
+    }
+
+    #[test]
+    fn test_dtd_sink_path_forwards_every_warning() {
+        use crate::model::capabilities::ModeSink;
+        #[derive(Default)]
+        struct Collect(Vec<EdidWarning>, Vec<VideoMode>);
+        impl ModeSink for Collect {
+            fn push_mode(&mut self, mode: VideoMode) {
+                self.1.push(mode);
+            }
+            fn push_warning(&mut self, w: EdidWarning) {
+                self.0.push(w);
+            }
+        }
+        let base = base_with_bordered_1080p(80, 2); // ambiguous, and 280 − 160 < 132
+        let mut sink = Collect::default();
+        super::decode_dtd_slot_into_sink(&base[0x36..0x48], &mut sink, 0);
+        assert_eq!(sink.1.len(), 1);
+        assert_eq!(sink.1[0].h_blank, None);
+        assert!(matches!(
+            sink.0[..],
+            [
+                EdidWarning::DtdBordersAmbiguous { .. },
+                EdidWarning::DtdBlankingInconsistent { .. }
+            ]
+        ));
     }
 
     #[test]

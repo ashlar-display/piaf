@@ -17,8 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`EdidWarning::DtdBordersAmbiguous`** for a Detailed Timing Descriptor with non-zero
   borders. EDID 1.3 counts the borders in the blanking, EDID 1.4 does not; piaf reads
   them as 1.3 (as EDIDs in practice do, and as its refresh rate already did), so
-  `h_blank` is the blanking minus both borders, and the warning says so. When the
-  borders are wider than the blanking, `h_blank` is left `None`.
+  `h_blank` is the blanking minus both borders, and the warning says so.
+- **`EdidWarning::DtdBlankingInconsistent`** when that reading leaves less than the front
+  porch and sync pulse (or, without borders, the blanking is too short for them): the
+  mode is kept with `h_blank` left `None`, and the warning carries the raw values for a
+  caller that applies the EDID 1.4 reading itself.
 
 ### Changed
 
