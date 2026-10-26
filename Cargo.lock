@@ -13,9 +13,7 @@ dependencies = [
 
 [[package]]
 name = "display-types"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d55798f52f556c3d0a8345ac33d44420bcadea3a2b93154248458f384fdddd78"
+version = "0.4.3"
 dependencies = [
  "bitflags",
  "serde",
