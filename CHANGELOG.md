@@ -10,10 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Horizontal blanking on decoded modes.** `VideoMode::h_blank` (display-types 0.4.4) is
-  set for every mode whose source gives the timing: EDID and CTA Detailed Timing
-  Descriptors, DisplayID detailed timings (Types I, II, VI, VII), DisplayID Type IX
-  (from the CVT formula), and VIC and DMT lookups. Modes known only by resolution and
-  refresh rate (established and standard timings, CVT 3-byte codes) leave it `None`.
+  set from EDID and CTA Detailed Timing Descriptors, DisplayID detailed timings (Types I,
+  II, VI, VII), DisplayID Type IX (from the CVT formula), and VIC and DMT lookups. It is
+  left `None` for modes known only by resolution and refresh rate: established and
+  standard timings, CVT 3-byte codes, DisplayID Types III and V, and CTA T10VTDB entries
+  (whose CVT formula piaf does not apply yet).
+- **DisplayID HDMI VICs 1–4 carry their full timing**, taken from the CTA VICs they are
+  defined as (95, 94, 93, 98): pixel clock, porches, sync and `h_blank`. Their `source`
+  stays `None`.
 - **`EdidWarning::DtdBordersAmbiguous`** for a Detailed Timing Descriptor with non-zero
   borders. EDID 1.3 counts the borders in the blanking, EDID 1.4 does not; piaf reads
   them as 1.3 (as EDIDs in practice do, and as its refresh rate already did), so

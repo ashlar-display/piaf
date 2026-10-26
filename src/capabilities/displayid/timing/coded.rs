@@ -61,20 +61,26 @@ pub(super) fn decode_type_viii_block(payload: &[u8], revision: u8, sink: &mut dy
 
 /// Returns the `VideoMode` for an HDMI VIC code (1–4), or `None`.
 ///
-/// HDMI 1.4 defines four extended resolution codes for 4K/UHD modes:
-/// - 1: 3840×2160@30 Hz
-/// - 2: 3840×2160@25 Hz
-/// - 3: 3840×2160@24 Hz
-/// - 4: 4096×2160@24 Hz
+/// HDMI 1.4 defines four extended resolution codes for 4K/UHD modes, each the same timing
+/// as a CTA-861 VIC, from which the full timing (pixel clock, porches, sync, `h_blank`) is
+/// taken:
+/// - 1: 3840×2160@30 Hz (CTA VIC 95)
+/// - 2: 3840×2160@25 Hz (CTA VIC 94)
+/// - 3: 3840×2160@24 Hz (CTA VIC 93)
+/// - 4: 4096×2160@24 Hz (CTA VIC 98)
+///
+/// The mode's `source` is left `None`: it is not the CTA VIC it borrows the timing from.
 fn hdmi_vic_to_mode(code: u8) -> Option<VideoMode> {
-    let (w, h, r): (u16, u16, u16) = match code {
-        1 => (3840, 2160, 30),
-        2 => (3840, 2160, 25),
-        3 => (3840, 2160, 24),
-        4 => (4096, 2160, 24),
+    let cta_vic = match code {
+        1 => 95,
+        2 => 94,
+        3 => 93,
+        4 => 98,
         _ => return None,
     };
-    Some(VideoMode::new(w, h, r, false))
+    let mut mode = vic_to_mode(cta_vic)?;
+    mode.source = None;
+    Some(mode)
 }
 
 /// Iterates the VESA Video Timing Block presence bitmap and pushes supported modes to `sink`.
@@ -191,6 +197,37 @@ mod tests {
             caps.supported_modes[0].refresh_rate,
             Some(RefreshRate::integral(30))
         );
+        // The full timing of CTA VIC 95, without claiming to be it.
+        assert_eq!(caps.supported_modes[0].pixel_clock_khz, Some(297_000));
+        assert_eq!(caps.supported_modes[0].h_blank, Some(560));
+        assert_eq!(caps.supported_modes[0].source, None);
+    }
+
+    #[test]
+    fn test_hdmi_vics_take_their_cta_timing() {
+        for (hdmi_vic, cta_vic) in [(1, 95), (2, 94), (3, 93), (4, 98)] {
+            let mode = hdmi_vic_to_mode(hdmi_vic).unwrap();
+            let cta = vic_to_mode(cta_vic).unwrap();
+            assert_eq!(
+                (
+                    mode.width,
+                    mode.height,
+                    mode.refresh_rate,
+                    mode.pixel_clock_khz,
+                    mode.h_blank
+                ),
+                (
+                    cta.width,
+                    cta.height,
+                    cta.refresh_rate,
+                    cta.pixel_clock_khz,
+                    cta.h_blank
+                ),
+                "HDMI VIC {hdmi_vic}"
+            );
+        }
+        assert!(hdmi_vic_to_mode(0).is_none());
+        assert!(hdmi_vic_to_mode(5).is_none());
     }
 
     #[test]
