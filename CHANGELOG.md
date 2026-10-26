@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Horizontal blanking on decoded modes.** `VideoMode::h_blank` (display-types 0.4.4) is
+- **Horizontal blanking on decoded modes.** `VideoMode::h_blank` (display-types 0.5) is
   set from EDID and CTA Detailed Timing Descriptors, DisplayID detailed timings (Types I,
   II, VI, VII), DisplayID Type IX (from the CVT formula), and VIC and DMT lookups. It is
   left `None` for modes known only by resolution and refresh rate: established and
