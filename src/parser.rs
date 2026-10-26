@@ -1,6 +1,8 @@
 use crate::model::diagnostics::EdidError;
 use crate::model::diagnostics::EdidWarning;
-use crate::model::edid::{ParsedEdid, ParsedEdidRef};
+#[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::edid::ParsedEdid;
+use crate::model::edid::ParsedEdidRef;
 use crate::model::extension::KnownExtensions;
 use crate::model::warnings::ParseWarnings;
 
@@ -25,8 +27,8 @@ pub const MAX_PARSE_WARNINGS: usize = 8;
 /// No block data is copied. The returned value borrows the base block and all extension
 /// blocks from `bytes`; it remains valid for as long as `bytes` is alive.
 ///
-/// To obtain an owned result that outlives the input buffer, call [`parse_edid_owned`]
-/// or convert with `ParsedEdid::from(parsed_ref)`.
+/// With `alloc`, to obtain an owned result that outlives the input buffer, call
+/// `parse_edid_owned` or convert with `ParsedEdid::from(parsed_ref)`.
 ///
 /// Performs length validation, header verification, and checksum verification for the base
 /// block and all declared extension blocks. Extension blocks with tags not known to `tags`
@@ -109,7 +111,7 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
 }
 
 /// Validates a raw EDID byte slice and returns an owned [`ParsedEdid`], copying the block
-/// data out of `bytes`.
+/// data out of `bytes` (`alloc`/`std`; without `alloc`, use [`parse_edid`]).
 ///
 /// Equivalent to `ParsedEdid::from(parse_edid(bytes, tags)?)`. Prefer [`parse_edid`] when
 /// you can keep the input buffer alive — it avoids copying the block bytes entirely.
@@ -117,6 +119,7 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
 /// # Errors
 ///
 /// Returns [`EdidError`] if the byte slice fails any structural check.
+#[cfg(any(feature = "alloc", feature = "std"))]
 pub fn parse_edid_owned<T: KnownExtensions + ?Sized>(
     bytes: &[u8],
     tags: &T,

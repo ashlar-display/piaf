@@ -47,6 +47,11 @@ impl<const N: usize> InlineWarnings<N> {
     pub(crate) fn dropped(&self) -> u16 {
         self.dropped
     }
+
+    // Counts `n` warnings that were dropped before they reached this storage.
+    pub(crate) fn add_dropped(&mut self, n: u16) {
+        self.dropped = self.dropped.saturating_add(n);
+    }
 }
 
 impl<const N: usize> Default for InlineWarnings<N> {

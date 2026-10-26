@@ -2,17 +2,15 @@
 use crate::model::capabilities::DisplayCapabilities;
 use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::diagnostics::ParseWarning;
-#[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::prelude::{Arc, Vec};
+use crate::model::prelude::Vec;
 use crate::model::warnings::ParseWarnings;
 
 pub use display_types::EdidVersion;
 
 /// Abstraction over parsed EDID representations.
 ///
-/// Implemented by both [`ParsedEdid`] (owned, copies block bytes) and [`ParsedEdidRef`]
-/// (borrowed, zero-copy). Both capability pipeline entry points —
+/// Implemented by [`ParsedEdidRef`] (borrowed, zero-copy) and, with `alloc`, `ParsedEdid`
+/// (owned, copies block bytes). Both capability pipeline entry points —
 /// [`capabilities_from_edid`][crate::capabilities_from_edid] and
 /// [`capabilities_from_edid_static`][crate::capabilities_from_edid_static] — accept any
 /// `T: EdidSource`.
@@ -30,84 +28,94 @@ pub trait EdidSource {
     /// Copies parse-phase warnings into `caps`.
     ///
     /// Called by [`capabilities_from_edid`][crate::capabilities_from_edid] after handler
-    /// processing. The default implementation is a no-op; [`ParsedEdid`] and [`ParsedEdidRef`]
-    /// override it in `alloc`/`std` builds to propagate their stored warnings.
+    /// processing. The default implementation copies
+    /// [`parse_warnings`][Self::parse_warnings].
     #[cfg(any(feature = "alloc", feature = "std"))]
-    fn propagate_parse_warnings(&self, _caps: &mut DisplayCapabilities) {}
+    fn propagate_parse_warnings(&self, caps: &mut DisplayCapabilities) {
+        for &w in self.parse_warnings() {
+            // The inherent `DisplayCapabilities::push_warning`, which wraps it in an `Arc`.
+            caps.push_warning(w);
+        }
+    }
 
-    /// Parse-phase warnings as [`EdidWarning`]s, in the order they occurred.
+    /// The parse-phase warnings, in the order they occurred.
     ///
     /// Read by [`capabilities_from_edid_static`][crate::capabilities_from_edid_static],
-    /// which stores them ahead of the base block's and the handlers' warnings. A stored
-    /// warning of another type (a `ParseWarning` a caller added to `ParsedEdid::warnings`)
-    /// cannot be held by [`StaticDisplayCapabilities`][crate::StaticDisplayCapabilities]
-    /// and is not yielded. The default implementation yields nothing; [`ParsedEdid`] and
-    /// [`ParsedEdidRef`] override it to yield their stored warnings.
-    fn edid_parse_warnings(&self) -> impl Iterator<Item = EdidWarning> + '_ {
-        core::iter::empty()
+    /// which stores them ahead of the base block's and the handlers' warnings, and (with
+    /// `alloc`) by the default `propagate_parse_warnings`. The default implementation
+    /// returns none.
+    fn parse_warnings(&self) -> &[EdidWarning] {
+        &[]
+    }
+
+    /// The number of parse-phase warnings that did not fit in the source's storage
+    /// (see [`ParsedEdidRef::warnings_dropped`]).
+    ///
+    /// [`capabilities_from_edid_static`][crate::capabilities_from_edid_static] adds it to
+    /// the result's [`warnings_dropped`][crate::StaticDisplayCapabilities::warnings_dropped].
+    /// The default implementation returns 0.
+    fn parse_warnings_dropped(&self) -> u16 {
+        0
     }
 }
 
-/// The [`EdidWarning`]s among `warnings`, skipping warnings of other types.
-#[cfg(any(feature = "alloc", feature = "std"))]
-fn edid_warnings(warnings: &[ParseWarning]) -> impl Iterator<Item = EdidWarning> + '_ {
-    warnings
-        .iter()
-        .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
-}
-
-/// The owned output of [`parse_edid_owned`][crate::parse_edid_owned].
+/// The owned output of [`parse_edid_owned`][crate::parse_edid_owned] (`alloc`/`std`).
 ///
 /// Copies block bytes out of the input buffer so the result can outlive it. Prefer
 /// [`ParsedEdidRef`] from [`parse_edid`][crate::parse_edid] when you can keep the input
-/// buffer alive — it avoids copying the block data entirely.
+/// buffer alive — it avoids copying the block data entirely. Without `alloc` there is no
+/// owned form: keep the input buffer and use [`ParsedEdidRef`].
 ///
 /// Pass to [`capabilities_from_edid`][crate::capabilities_from_edid] or
 /// [`capabilities_from_edid_static`][crate::capabilities_from_edid_static] to derive a
 /// consumer-friendly [`DisplayCapabilities`].
+#[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone)]
 pub struct ParsedEdid {
     /// The raw 128-byte EDID base block, validated and checksum-verified.
     pub base_block: [u8; 128],
     /// Raw 128-byte extension blocks, in the order they appear in the stream.
-    #[cfg(any(feature = "alloc", feature = "std"))]
     pub extensions: Vec<[u8; 128]>,
-    /// Non-fatal conditions encountered during parsing (e.g. unrecognised extension tags).
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    pub warnings: Vec<ParseWarning>,
+    // Non-fatal conditions encountered during parsing.
+    warnings: ParseWarnings,
 }
 
+#[cfg(any(feature = "alloc", feature = "std"))]
+impl ParsedEdid {
+    /// The non-fatal conditions encountered during parsing, in the order they occurred.
+    pub fn warnings(&self) -> &[EdidWarning] {
+        self.warnings.as_slice()
+    }
+
+    /// Iterates the non-fatal conditions encountered during parsing, in the order they
+    /// occurred.
+    pub fn iter_warnings(&self) -> impl Iterator<Item = &EdidWarning> {
+        self.warnings().iter()
+    }
+
+    /// The number of warnings that did not fit; always 0, as `ParsedEdid` keeps every
+    /// warning. Here for parity with [`ParsedEdidRef::warnings_dropped`].
+    pub fn warnings_dropped(&self) -> u16 {
+        self.warnings.dropped()
+    }
+}
+
+#[cfg(any(feature = "alloc", feature = "std"))]
 impl EdidSource for ParsedEdid {
     fn base_block(&self) -> &[u8; 128] {
         &self.base_block
     }
 
     fn extension_blocks(&self) -> impl Iterator<Item = &[u8; 128]> {
-        #[cfg(any(feature = "alloc", feature = "std"))]
-        {
-            self.extensions.iter()
-        }
-        #[cfg(not(any(feature = "alloc", feature = "std")))]
-        {
-            core::iter::empty::<&[u8; 128]>()
-        }
+        self.extensions.iter()
     }
 
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    fn propagate_parse_warnings(&self, caps: &mut DisplayCapabilities) {
-        caps.warnings.extend(self.warnings.iter().cloned());
+    fn parse_warnings(&self) -> &[EdidWarning] {
+        self.warnings()
     }
 
-    fn edid_parse_warnings(&self) -> impl Iterator<Item = EdidWarning> + '_ {
-        #[cfg(any(feature = "alloc", feature = "std"))]
-        {
-            edid_warnings(&self.warnings)
-        }
-        // Bare `no_std` `ParsedEdid` stores no warnings.
-        #[cfg(not(any(feature = "alloc", feature = "std")))]
-        {
-            core::iter::empty()
-        }
+    fn parse_warnings_dropped(&self) -> u16 {
+        self.warnings_dropped()
     }
 }
 
@@ -120,8 +128,8 @@ impl EdidSource for ParsedEdid {
 ///
 /// Pass to [`capabilities_from_edid`][crate::capabilities_from_edid] or
 /// [`capabilities_from_edid_static`][crate::capabilities_from_edid_static] to derive a
-/// consumer-friendly representation. Convert to [`ParsedEdid`] via `ParsedEdid::from(r)`
-/// if you need to store the result after freeing the input buffer.
+/// consumer-friendly representation. With `alloc`, convert to `ParsedEdid` via
+/// `ParsedEdid::from(r)` if you need to store the result after freeing the input buffer.
 #[derive(Debug)]
 pub struct ParsedEdidRef<'a> {
     /// The raw 128-byte EDID base block, validated and checksum-verified.
@@ -174,16 +182,12 @@ impl<'a> EdidSource for ParsedEdidRef<'a> {
         (0..self.num_extensions).filter_map(|i| self.extension_block(i))
     }
 
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    fn propagate_parse_warnings(&self, caps: &mut DisplayCapabilities) {
-        for &w in self.warnings() {
-            // The inherent `DisplayCapabilities::push_warning`, which wraps it in an `Arc`.
-            caps.push_warning(w);
-        }
+    fn parse_warnings(&self) -> &[EdidWarning] {
+        self.warnings()
     }
 
-    fn edid_parse_warnings(&self) -> impl Iterator<Item = EdidWarning> + '_ {
-        self.warnings().iter().copied()
+    fn parse_warnings_dropped(&self) -> u16 {
+        self.warnings_dropped()
     }
 }
 
@@ -199,20 +203,7 @@ impl<'a> From<ParsedEdidRef<'a>> for ParsedEdid {
                 .filter_map(|i| r.extension_block(i))
                 .copied()
                 .collect(),
-            warnings: r
-                .warnings()
-                .iter()
-                .map(|&w| -> ParseWarning { Arc::new(w) })
-                .collect(),
-        }
-    }
-}
-
-#[cfg(not(any(feature = "alloc", feature = "std")))]
-impl<'a> From<ParsedEdidRef<'a>> for ParsedEdid {
-    fn from(r: ParsedEdidRef<'a>) -> Self {
-        Self {
-            base_block: *r.base_block,
+            warnings: r.warnings,
         }
     }
 }

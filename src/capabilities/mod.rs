@@ -142,8 +142,10 @@ pub fn capabilities_from_edid<T: EdidSource>(
 /// data (SVDs, DTDs, VTB-EXT timings) is extracted; rich metadata such as audio descriptors
 /// and colorimetry blocks requires the alloc pipeline.
 ///
-/// The result's warnings are the parser's (from
-/// [`EdidSource::edid_parse_warnings`]) first, then the base block's, then the handlers'.
+/// The result's warnings are the parser's (from [`EdidSource::parse_warnings`]) first, then
+/// the base block's, then the handlers'. Its
+/// [`warnings_dropped`][StaticDisplayCapabilities::warnings_dropped] includes the warnings
+/// the parser could not store ([`EdidSource::parse_warnings_dropped`]).
 ///
 /// This function is a replacement for [`capabilities_from_edid`], not a complement —
 /// calling both on the same EDID will process extension blocks twice.
@@ -159,9 +161,10 @@ pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
     let mut caps = StaticDisplayCapabilities::<N>::default();
 
     // The parser's warnings first: they occurred before any block was decoded.
-    for warning in parsed.edid_parse_warnings() {
+    for &warning in parsed.parse_warnings() {
         caps.push_warning(warning);
     }
+    caps.add_warnings_dropped(parsed.parse_warnings_dropped());
 
     #[cfg(any(feature = "alloc", feature = "std"))]
     {
@@ -336,8 +339,8 @@ mod static_tests {
     use crate::model::extension::ExtensionTagRegistry;
     use crate::parser::parse_edid;
 
-    // With the size mismatch, as many parse warnings as `ParsedEdidRef` holds in bare no_std.
-    const EXTENSIONS: usize = 7;
+    // With the size mismatch, more parse warnings than `ParsedEdidRef` holds in bare no_std.
+    const EXTENSIONS: usize = 10;
 
     /// A base block with an all-zero (invalid) manufacturer ID and `EXTENSIONS` blocks with
     /// the unknown tag `0x55`, followed by one stray byte.
@@ -367,7 +370,8 @@ mod static_tests {
             actual: bytes.len(),
         };
         assert_eq!(caps.warnings(), expected);
-        // The base block's `InvalidManufacturerId` came after and did not fit.
-        assert_eq!(caps.warnings_dropped(), 1);
+        // 3 unknown extensions and the base block's `InvalidManufacturerId` did not fit,
+        // whether the parser (bare no_std) or the static output (alloc) dropped them.
+        assert_eq!(caps.warnings_dropped(), 4);
     }
 }

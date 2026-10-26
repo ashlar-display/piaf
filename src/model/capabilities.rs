@@ -329,6 +329,11 @@ impl<const MAX_MODES: usize> StaticDisplayCapabilities<MAX_MODES> {
     pub fn warnings_dropped(&self) -> u16 {
         self.warnings.dropped()
     }
+
+    // Counts warnings dropped upstream (by the parser) in `warnings_dropped`.
+    pub(crate) fn add_warnings_dropped(&mut self, n: u16) {
+        self.warnings.add_dropped(n);
+    }
 }
 
 impl<const MAX_MODES: usize> ModeSink for StaticDisplayCapabilities<MAX_MODES> {

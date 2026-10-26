@@ -53,10 +53,10 @@ pub use model::{
     DisplayInterfaceFeatures, DisplayInterfaceType, DisplayTechnology, EdidError, EdidSource,
     EdidVersion, EdidWarning, ExtensionLibrary, ExtensionMetadata, ExtensionTagRegistry,
     GtfSecondaryParams, InterfaceContentProtection, KnownExtensions, MAX_STATIC_WARNINGS,
-    ManufactureDate, ManufacturerId, ModeSink, MonitorString, OperatingMode, ParsedEdid,
-    ParsedEdidRef, PhysicalOrientation, PowerSequencing, RefreshRate, RotationCapability,
-    ScanDirection, ScreenSize, StaticContext, StaticDisplayCapabilities, StaticExtensionHandler,
-    StereoMode, StereoSyncInterface, StereoTimingCode, StereoTimingCodeType, StereoTimingScopeV2,
+    ManufactureDate, ManufacturerId, ModeSink, MonitorString, OperatingMode, ParsedEdidRef,
+    PhysicalOrientation, PowerSequencing, RefreshRate, RotationCapability, ScanDirection,
+    ScreenSize, StaticContext, StaticDisplayCapabilities, StaticExtensionHandler, StereoMode,
+    StereoSyncInterface, StereoTimingCode, StereoTimingCodeType, StereoTimingScopeV2,
     StereoViewingMode, SubpixelLayout, SyncDefinition, TileBezelInfo, TileTopologyBehavior,
     TimingFormula, TransferPointEncoding, TypeIxStereoMode, VideoInputFlags, VideoInterface,
     VideoMode, WhitePoint, ZeroPixelLocation,
@@ -66,9 +66,13 @@ pub use model::{DisplayIdTransferCharacteristic, TransferCurve};
 
 /// EDID byte-level parser.
 pub mod parser;
-pub use parser::{parse_edid, parse_edid_owned};
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use model::ParsedEdid;
+pub use parser::parse_edid;
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use parser::parse_edid_owned;
 
-/// Capability extraction from a [`ParsedEdid`].
+/// Capability extraction from a parsed EDID ([`EdidSource`]).
 pub mod capabilities;
 pub use capabilities::Cea861Flags;
 #[cfg(any(feature = "alloc", feature = "std"))]

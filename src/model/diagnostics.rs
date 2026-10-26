@@ -3,10 +3,12 @@ pub use display_types::ParseWarning;
 
 /// A non-fatal condition encountered while parsing or processing an EDID block.
 ///
-/// Warnings are collected into [`ParsedEdid::warnings`][crate::ParsedEdid] (from the parser)
-/// and into [`DisplayCapabilities::warnings`][crate::DisplayCapabilities] (from handlers).
-/// In `alloc`/`std` builds each entry is a [`ParseWarning`]; use `downcast_ref` to recover the
-/// concrete type. In bare `no_std` builds this enum is used directly.
+/// The parser's warnings are this enum directly, in every build: see
+/// [`ParsedEdidRef::warnings`][crate::ParsedEdidRef::warnings], and with `alloc`,
+/// `ParsedEdid::warnings`. So are the warnings of
+/// [`StaticDisplayCapabilities`][crate::StaticDisplayCapabilities]. In
+/// `DisplayCapabilities::warnings` (`alloc`/`std`) each entry is a `ParseWarning`; use
+/// `downcast_ref` to recover the concrete type.
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

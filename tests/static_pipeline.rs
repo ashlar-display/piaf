@@ -3,7 +3,6 @@ use piaf::{
     ModeSink, ParsedEdid, RefreshRate, STANDARD_HANDLERS, StaticDisplayCapabilities,
     capabilities_from_edid, capabilities_from_edid_static, parse_edid,
 };
-use std::sync::Arc;
 
 fn load(path: &str) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read fixture {path}: {e}"))
@@ -364,17 +363,4 @@ fn static_pipeline_keeps_parse_warnings() {
     let caps: StaticDisplayCapabilities<8> =
         capabilities_from_edid_static(&owned, STANDARD_HANDLERS);
     assert_eq!(caps.warnings(), PARSE_THEN_BASE_WARNINGS);
-}
-
-/// A parse warning of a type other than `EdidWarning` has no place in the static output.
-#[test]
-fn static_pipeline_skips_foreign_parse_warnings() {
-    let bytes = edid_with_parse_warnings();
-    let mut owned = ParsedEdid::from(parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap());
-    owned.warnings.insert(0, Arc::new(std::fmt::Error));
-
-    let caps: StaticDisplayCapabilities<8> =
-        capabilities_from_edid_static(&owned, STANDARD_HANDLERS);
-    assert_eq!(caps.warnings(), PARSE_THEN_BASE_WARNINGS);
-    assert_eq!(caps.warnings_dropped(), 0);
 }

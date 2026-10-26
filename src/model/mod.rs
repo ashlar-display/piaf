@@ -25,7 +25,9 @@ pub(crate) mod warnings;
 
 /// Parsed EDID intermediate representation.
 pub mod edid;
-pub use edid::{EdidSource, EdidVersion, ParsedEdid, ParsedEdidRef};
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use edid::ParsedEdid;
+pub use edid::{EdidSource, EdidVersion, ParsedEdidRef};
 
 /// Color-related model types.
 pub mod color;
