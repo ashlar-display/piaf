@@ -41,8 +41,6 @@ pub mod model;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use model::ExtensionData;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use model::ExtensionHandler;
-#[cfg(any(feature = "alloc", feature = "std"))]
 pub use model::ParseWarning;
 pub use model::{
     AnalogColorType, AnalogSyncLevel, BacklightType, Chromaticity, ChromaticityPoint,
@@ -63,6 +61,8 @@ pub use model::{
 };
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use model::{DisplayIdTransferCharacteristic, TransferCurve};
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use model::{ExtensionHandler, HandlerContext};
 
 /// EDID byte-level parser.
 pub mod parser;

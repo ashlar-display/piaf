@@ -5,7 +5,8 @@ use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::extension::ExtensionHandler;
+use crate::model::extension::{ExtensionHandler, HandlerContext};
+#[cfg(not(any(feature = "alloc", feature = "std")))]
 use crate::model::options::DecodeOptions;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Arc, Vec};
@@ -71,16 +72,17 @@ impl ExtensionHandler for BaseBlockHandler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
-        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
+        self.process_in_context(blocks, caps, warnings, &HandlerContext::default());
     }
 
-    fn process_with_options(
+    fn process_in_context(
         &self,
         blocks: &[&[u8; 128]],
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
-        options: &DecodeOptions,
+        ctx: &HandlerContext<'_>,
     ) {
+        let options = ctx.options();
         // Base handlers are always called with a single-element slice containing the
         // base block. Guard against an empty slice from a misconfigured call site.
         let Some(base) = blocks.first() else { return };

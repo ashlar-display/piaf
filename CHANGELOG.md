@@ -98,6 +98,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **piaf did not build for bare-metal targets** (e.g. `thumbv7em-none-eabi`), with or
+  without `alloc`. Its `std` and `alloc` features did not reach its dependencies, so
+  display-types and thiserror were always built with `std`, and the `no_std` build only
+  compiled on targets that have it. Now `std` enables `alloc`, the features are forwarded
+  to display-types, and display-types and thiserror are taken without their default
+  features. Two places relied on the hidden `std`: the bare build imports
+  `DisplayCapabilities` from `display_types::capabilities` (display-types re-exports it
+  at its root only with `alloc`), and the HDR Static Metadata luminance (`50 ×
+  2^(cv/32)`) is computed from a table of `2^(k/32)` instead of `f32::exp2`, with the
+  same result for every code value.
 - **`capabilities_from_edid_static` dropped the base block's warnings in alloc builds**
   (bare `no_std` builds kept them): `DtdPixelClockOverflow`, the DTD border warnings and
   the rest now reach the static output in every build.
@@ -109,6 +119,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0x03) were decoded by a separate decoder that kept only the resolution, refresh rate
   and interlace flag. They now go through the same decoder as every other DTD, with the
   pixel clock, porches, sync, borders, stereo and `h_blank`, and its warnings.
+
+### Internal
+
+- **CI builds the `no_std` and `alloc`-only configurations for `thumbv7em-none-eabi`**,
+  in `ci.yml` and in the `verify` job of `publish.yml`, as the rest of the stack does. A
+  host build always has `std`, so it could not catch a dependency that needs it.
 
 ## [0.4.2] - 2026-10-18
 

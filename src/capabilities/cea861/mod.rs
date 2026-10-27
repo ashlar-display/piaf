@@ -37,9 +37,9 @@ use crate::model::capabilities::VideoMode;
 use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
-#[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::extension::ExtensionHandler;
 use crate::model::extension::StaticExtensionHandler;
+#[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::extension::{ExtensionHandler, HandlerContext};
 use crate::model::options::DecodeOptions;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Arc, Vec};
@@ -75,16 +75,17 @@ impl ExtensionHandler for Cea861Handler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
-        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
+        self.process_in_context(blocks, caps, warnings, &HandlerContext::default());
     }
 
-    fn process_with_options(
+    fn process_in_context(
         &self,
         blocks: &[&[u8; 128]],
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
-        options: &DecodeOptions,
+        ctx: &HandlerContext<'_>,
     ) {
+        let options = ctx.options();
         let Some(first) = blocks.first() else { return };
         let flags = Cea861Flags::from_bits_truncate(first[3]);
 

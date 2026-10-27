@@ -42,6 +42,8 @@ use crate::model::capabilities::{DisplayCapabilities, ModeSink, StaticDisplayCap
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
 use crate::model::edid::EdidSource;
+#[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::extension::HandlerContext;
 use crate::model::extension::{ExtensionLibrary, StaticExtensionHandler};
 use crate::model::options::DecodeOptions;
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -98,7 +100,7 @@ pub fn capabilities_from_edid<T: EdidSource>(
 
 /// [`capabilities_from_edid`] with the caller's [`DecodeOptions`].
 ///
-/// Every handler receives the options through `ExtensionHandler::process_with_options`
+/// Every handler receives the options through `ExtensionHandler::process_in_context`
 /// (`alloc`/`std`), so one setting covers the whole EDID. A handler that does not override
 /// it ignores them.
 pub fn capabilities_from_edid_with_options<T: EdidSource>(
@@ -115,8 +117,9 @@ pub fn capabilities_from_edid_with_options<T: EdidSource>(
         // 1. Process Base Block through all registered base handlers, in order.
         // Each handler receives a single-element slice containing the base block.
         let base = edid.base_block();
+        let base_ctx = HandlerContext::new(options, &[0]);
         for handler in &library.base_handlers {
-            handler.process_with_options(&[base], &mut caps, &mut warnings, &options);
+            handler.process_in_context(&[base], &mut caps, &mut warnings, &base_ctx);
         }
 
         // 2. Dispatch extension blocks: for each registered handler, collect all
@@ -124,12 +127,10 @@ pub fn capabilities_from_edid_with_options<T: EdidSource>(
         // full slice. Handlers are responsible for any multi-block reassembly.
         for metadata in &library.extensions {
             if let Some(handler) = &metadata.handler {
-                let blocks: Vec<&[u8; 128]> = edid
-                    .extension_blocks()
-                    .filter(|b| b[0] == metadata.tag)
-                    .collect();
+                let (blocks, numbers) = blocks_with_tag(edid, metadata.tag);
                 if !blocks.is_empty() {
-                    handler.process_with_options(&blocks, &mut caps, &mut warnings, &options);
+                    let ctx = HandlerContext::new(options, &numbers);
+                    handler.process_in_context(&blocks, &mut caps, &mut warnings, &ctx);
                 }
             }
         }
@@ -204,11 +205,11 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
     {
         use crate::model::extension::ExtensionHandler;
         let mut w: Vec<ParseWarning> = Vec::new();
-        base::BaseBlockHandler.process_with_options(
+        base::BaseBlockHandler.process_in_context(
             &[parsed.base_block()],
             &mut base_caps,
             &mut w,
-            &options,
+            &HandlerContext::new(options, &[0]),
         );
         // base_caps now holds scalar fields, preferred_image_size_mm, and supported_modes.
         // The base block's warnings are `EdidWarning`s behind `Arc<dyn Error>`; copy them
@@ -285,12 +286,11 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
     {
         use crate::model::capabilities::StaticContext;
         for handler in handlers {
-            let blocks: Vec<&[u8; 128]> = parsed
-                .extension_blocks()
-                .filter(|b| b[0] == handler.tag())
-                .collect();
+            let (blocks, numbers) = blocks_with_tag(parsed, handler.tag());
             if !blocks.is_empty() {
-                let mut ctx = StaticContext::new(&mut caps).with_options(options);
+                let mut ctx = StaticContext::new(&mut caps)
+                    .with_options(options)
+                    .with_block_numbers(&numbers);
                 handler.process(&blocks, &mut ctx);
             }
         }
@@ -299,9 +299,12 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
     #[cfg(not(any(feature = "alloc", feature = "std")))]
     {
         use crate::model::capabilities::StaticContext;
-        for ext in parsed.extension_blocks() {
+        for (ext, number) in parsed.extension_blocks().zip(1..=u8::MAX) {
             if let Some(handler) = handlers.iter().find(|h| h.tag() == ext[0]) {
-                let mut ctx = StaticContext::new(&mut caps).with_options(options);
+                let numbers = [number];
+                let mut ctx = StaticContext::new(&mut caps)
+                    .with_options(options)
+                    .with_block_numbers(&numbers);
                 handler.process(&[ext], &mut ctx);
             }
         }
@@ -310,11 +313,24 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
     caps
 }
 
+/// The extension blocks with `tag`, in stream order, and the EDID block number of each.
+///
+/// Extension `n` (from 1) is block `n`. An EDID's extension count is one byte, so its blocks
+/// are numbered up to 255; a source yielding more extensions than that is cut off there.
+#[cfg(any(feature = "alloc", feature = "std"))]
+fn blocks_with_tag<T: EdidSource>(edid: &T, tag: u8) -> (Vec<&[u8; 128]>, Vec<u8>) {
+    edid.extension_blocks()
+        .zip(1..=u8::MAX)
+        .filter(|(b, _)| b[0] == tag)
+        .unzip()
+}
+
 #[cfg(test)]
 #[cfg(any(feature = "alloc", feature = "std"))]
 mod tests {
     use super::*;
-    use crate::model::extension::ExtensionTagRegistry;
+    use crate::model::capabilities::VideoMode;
+    use crate::model::extension::{ExtensionHandler, ExtensionTagRegistry};
     use crate::parser::parse_edid;
 
     /// The modes with the 2-pixel borders of `static_tests::edid_with_bordered_dtds`, and
@@ -375,6 +391,70 @@ mod tests {
 
     // Verifies that with_standard_handlers() wires BaseBlockHandler into the pipeline.
     // Handler-level assertions live in base.rs and cea861.rs.
+    /// Pushes a mode `n` pixels wide for each block, `n` being the block's number, or a
+    /// mode 0 pixels high when the context has none.
+    #[derive(Debug)]
+    struct BlockNumberRecorder;
+
+    impl ExtensionHandler for BlockNumberRecorder {
+        fn process(
+            &self,
+            _: &[&[u8; 128]],
+            _: &mut DisplayCapabilities,
+            _: &mut Vec<ParseWarning>,
+        ) {
+        }
+
+        fn process_in_context(
+            &self,
+            blocks: &[&[u8; 128]],
+            caps: &mut DisplayCapabilities,
+            _: &mut Vec<ParseWarning>,
+            ctx: &HandlerContext<'_>,
+        ) {
+            for i in 0..blocks.len() {
+                let mode = match ctx.block_number(i) {
+                    Some(n) => VideoMode::new(n.into(), 1, 60u32, false),
+                    None => VideoMode::new(0, 0, 60u32, false),
+                };
+                caps.supported_modes.push(mode);
+            }
+        }
+    }
+
+    #[test]
+    fn test_dispatch_numbers_blocks() {
+        use crate::model::extension::ExtensionMetadata;
+
+        let mut library = ExtensionLibrary::new();
+        library.add_base_handler(BlockNumberRecorder);
+        library.register(ExtensionMetadata {
+            tag: 0x55,
+            display_name: "Recorder".into(),
+            handler: Some(Box::new(BlockNumberRecorder)),
+        });
+        let bytes = super::static_tests::edid_with_tagged_extensions();
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid(&parsed, &library);
+
+        let numbers: Vec<(u16, u16)> = caps
+            .supported_modes
+            .iter()
+            .map(|m| (m.width, m.height))
+            .collect();
+        assert_eq!(numbers, [(0, 1), (1, 1), (3, 1)]);
+    }
+
+    #[test]
+    fn test_default_context_has_no_block_numbers() {
+        let ctx = HandlerContext::default();
+        assert_eq!(ctx.block_number(0), None);
+        assert_eq!(ctx.options(), &DecodeOptions::new());
+
+        let ctx = HandlerContext::new(DecodeOptions::new(), &[1, 3]);
+        assert_eq!((ctx.block_number(1), ctx.block_number(2)), (Some(3), None));
+    }
+
     #[test]
     fn test_standard_handlers_are_wired() {
         let mut bytes = [0u8; 128];
@@ -430,6 +510,7 @@ mod tests {
 #[cfg(test)]
 mod static_tests {
     use super::*;
+    use crate::model::capabilities::{StaticContext, VideoMode};
     use crate::model::diagnostics::EdidWarning;
     use crate::model::extension::ExtensionTagRegistry;
     use crate::parser::parse_edid;
@@ -451,6 +532,51 @@ mod static_tests {
             block[127] = 0u8.wrapping_sub(sum);
         }
         bytes
+    }
+
+    /// A base block and three extensions tagged `0x55`, `0x66`, `0x55`: blocks 1 and 3 are
+    /// `0x55`.
+    pub(super) fn edid_with_tagged_extensions() -> [u8; 512] {
+        let mut bytes = [0u8; 512];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[126] = 3;
+        for (i, block) in bytes.chunks_exact_mut(128).enumerate() {
+            block[0] = match i {
+                0 => block[0],
+                2 => 0x66,
+                _ => 0x55,
+            };
+            let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            block[127] = 0u8.wrapping_sub(sum);
+        }
+        bytes
+    }
+
+    /// Pushes a mode `n` pixels wide for each block, `n` being the block's number.
+    struct StaticBlockNumberRecorder;
+
+    impl StaticExtensionHandler for StaticBlockNumberRecorder {
+        fn tag(&self) -> u8 {
+            0x55
+        }
+
+        fn process(&self, blocks: &[&[u8; 128]], ctx: &mut StaticContext<'_>) {
+            for i in 0..blocks.len() {
+                let n = ctx
+                    .block_number(i)
+                    .expect("the dispatch numbers every block");
+                ctx.push_mode(VideoMode::new(n.into(), 1, 60u32, false));
+            }
+        }
+    }
+
+    #[test]
+    fn test_static_pipeline_numbers_extension_blocks() {
+        let bytes = edid_with_tagged_extensions();
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[&StaticBlockNumberRecorder]);
+
+        assert!(caps.iter_modes().map(|m| m.width).eq([1, 3]));
     }
 
     #[test]
