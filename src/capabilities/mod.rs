@@ -98,10 +98,9 @@ pub fn capabilities_from_edid<T: EdidSource>(
 
 /// [`capabilities_from_edid`] with the caller's [`DecodeOptions`].
 ///
-/// Every handler receives the options through
-/// [`ExtensionHandler::process_with_options`][crate::ExtensionHandler::process_with_options],
-/// so one setting covers the whole EDID. A handler that does not override it ignores
-/// them.
+/// Every handler receives the options through `ExtensionHandler::process_with_options`
+/// (`alloc`/`std`), so one setting covers the whole EDID. A handler that does not override
+/// it ignores them.
 pub fn capabilities_from_edid_with_options<T: EdidSource>(
     edid: &T,
     library: &ExtensionLibrary,
