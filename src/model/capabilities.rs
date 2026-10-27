@@ -6,7 +6,10 @@ use crate::model::warnings::InlineWarnings;
 pub use display_types::{
     CvtAlgorithm, ModeSource, RefreshRate, StereoMode, SyncDefinition, TypeIxStereoMode, VideoMode,
 };
-pub use display_types::{DisplayCapabilities, ExtensionData};
+// From its module: display-types re-exports it at the root only with `alloc`.
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use display_types::ExtensionData;
+pub use display_types::capabilities::DisplayCapabilities;
 
 /// Sink for mode and warning writes from extension handlers.
 ///
