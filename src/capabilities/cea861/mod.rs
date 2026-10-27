@@ -75,6 +75,16 @@ impl ExtensionHandler for Cea861Handler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
+        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
+    }
+
+    fn process_with_options(
+        &self,
+        blocks: &[&[u8; 128]],
+        caps: &mut DisplayCapabilities,
+        warnings: &mut Vec<ParseWarning>,
+        options: &DecodeOptions,
+    ) {
         let Some(first) = blocks.first() else { return };
         let flags = Cea861Flags::from_bits_truncate(first[3]);
 
@@ -103,6 +113,7 @@ impl ExtensionHandler for Cea861Handler {
                     caps,
                     &mut cea_caps,
                     warnings,
+                    options,
                 );
             }
 
@@ -112,12 +123,7 @@ impl ExtensionHandler for Cea861Handler {
                 let mut offset = dtd_offset;
                 let mut dtd_index: u8 = 0;
                 while offset + 18 <= 127 {
-                    decode_dtd_slot(
-                        &ext[offset..offset + 18],
-                        caps,
-                        dtd_index,
-                        &DecodeOptions::new(),
-                    );
+                    decode_dtd_slot(&ext[offset..offset + 18], caps, dtd_index, options);
                     offset += 18;
                     dtd_index = dtd_index.saturating_add(1);
                 }
@@ -146,6 +152,7 @@ pub(crate) fn parse_cea861_data_block_collection(
     caps: &mut DisplayCapabilities,
     cea_caps: &mut Cea861Capabilities,
     warnings: &mut Vec<ParseWarning>,
+    options: &DecodeOptions,
 ) {
     let mut i = 0;
     while i < collection.len() {
@@ -195,7 +202,7 @@ pub(crate) fn parse_cea861_data_block_collection(
                 cea_caps.vesa_transfer_characteristic =
                     parse_vesa_transfer_characteristic(block_data);
             }
-            0x07 => handle_extended_tag_block(block_data, caps, cea_caps),
+            0x07 => handle_extended_tag_block(block_data, caps, cea_caps, options),
             _ => {}
         }
 
@@ -265,6 +272,7 @@ fn handle_extended_tag_block(
     block_data: &[u8],
     caps: &mut DisplayCapabilities,
     cea_caps: &mut Cea861Capabilities,
+    options: &DecodeOptions,
 ) {
     match block_data.first().copied() {
         Some(EXT_TAG_VSVDB) => {
@@ -281,9 +289,9 @@ fn handle_extended_tag_block(
             cea_caps.vesa_display_device = parse_vesa_display_device(&block_data[1..]);
         }
         Some(EXT_TAG_VTB_EXT) => {
-            if let Some(vtb) = parse_vtb_ext(&block_data[1..], &DecodeOptions::new(), &mut |w| {
-                caps.push_warning(w)
-            }) {
+            if let Some(vtb) =
+                parse_vtb_ext(&block_data[1..], options, &mut |w| caps.push_warning(w))
+            {
                 for timing in &vtb.timings {
                     push_mode_dedup(&mut caps.supported_modes, timing.clone());
                 }

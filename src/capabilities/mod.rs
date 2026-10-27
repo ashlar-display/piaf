@@ -86,9 +86,26 @@ impl ExtensionLibrary {
 /// Base handlers are called first (in registration order), then extension block handlers are
 /// called for each extension block whose tag matches a registered entry in `library`.
 /// Warnings from all handlers are collected into [`DisplayCapabilities::warnings`].
+///
+/// Decodes with the default [`DecodeOptions`]; see [`capabilities_from_edid_with_options`]
+/// to settle ambiguous readings.
 pub fn capabilities_from_edid<T: EdidSource>(
     edid: &T,
     library: &ExtensionLibrary,
+) -> DisplayCapabilities {
+    capabilities_from_edid_with_options(edid, library, DecodeOptions::new())
+}
+
+/// [`capabilities_from_edid`] with the caller's [`DecodeOptions`].
+///
+/// Every handler receives the options through
+/// [`ExtensionHandler::process_with_options`][crate::ExtensionHandler::process_with_options],
+/// so one setting covers the whole EDID. A handler that does not override it ignores
+/// them.
+pub fn capabilities_from_edid_with_options<T: EdidSource>(
+    edid: &T,
+    library: &ExtensionLibrary,
+    options: DecodeOptions,
 ) -> DisplayCapabilities {
     let mut caps = DisplayCapabilities::default();
 
@@ -100,7 +117,7 @@ pub fn capabilities_from_edid<T: EdidSource>(
         // Each handler receives a single-element slice containing the base block.
         let base = edid.base_block();
         for handler in &library.base_handlers {
-            handler.process(&[base], &mut caps, &mut warnings);
+            handler.process_with_options(&[base], &mut caps, &mut warnings, &options);
         }
 
         // 2. Dispatch extension blocks: for each registered handler, collect all
@@ -113,7 +130,7 @@ pub fn capabilities_from_edid<T: EdidSource>(
                     .filter(|b| b[0] == metadata.tag)
                     .collect();
                 if !blocks.is_empty() {
-                    handler.process(&blocks, &mut caps, &mut warnings);
+                    handler.process_with_options(&blocks, &mut caps, &mut warnings, &options);
                 }
             }
         }
@@ -124,7 +141,8 @@ pub fn capabilities_from_edid<T: EdidSource>(
 
     #[cfg(not(any(feature = "alloc", feature = "std")))]
     {
-        let _ = library;
+        // The base block's decoded fields do not depend on the options.
+        let _ = (library, options);
         base::decode_base_block(edid.base_block(), &mut caps, &mut NullSink);
     }
 
@@ -185,8 +203,14 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
 
     #[cfg(any(feature = "alloc", feature = "std"))]
     {
+        use crate::model::extension::ExtensionHandler;
         let mut w: Vec<ParseWarning> = Vec::new();
-        base::BaseBlockHandler.decode(&[parsed.base_block()], &mut base_caps, &mut w, &options);
+        base::BaseBlockHandler.process_with_options(
+            &[parsed.base_block()],
+            &mut base_caps,
+            &mut w,
+            &options,
+        );
         // base_caps now holds scalar fields, preferred_image_size_mm, and supported_modes.
         // The base block's warnings are `EdidWarning`s behind `Arc<dyn Error>`; copy them
         // into the static output, as the bare no_std path below records them directly.
@@ -293,6 +317,62 @@ mod tests {
     use super::*;
     use crate::model::extension::ExtensionTagRegistry;
     use crate::parser::parse_edid;
+
+    /// The modes with the 2-pixel borders of `static_tests::edid_with_bordered_dtds`, and
+    /// the number of `DtdBordersAmbiguous` warnings.
+    fn bordered_modes_and_ambiguous(
+        caps: &DisplayCapabilities,
+    ) -> (Vec<&crate::model::capabilities::VideoMode>, usize) {
+        use crate::model::diagnostics::EdidWarning;
+        let modes = caps
+            .supported_modes
+            .iter()
+            .filter(|m| m.h_border == 2)
+            .collect();
+        let ambiguous = caps
+            .iter_warnings()
+            .filter_map(|w| (**w).downcast_ref::<EdidWarning>())
+            .filter(|w| matches!(w, EdidWarning::DtdBordersAmbiguous { .. }))
+            .count();
+        (modes, ambiguous)
+    }
+
+    #[test]
+    fn test_default_options_leave_border_reading_unsettled() {
+        let bytes = super::static_tests::edid_with_bordered_dtds();
+        let parsed = parse_edid(&bytes, STANDARD_HANDLERS).unwrap();
+        let caps = capabilities_from_edid(&parsed, &ExtensionLibrary::with_standard_handlers());
+
+        let (modes, ambiguous) = bordered_modes_and_ambiguous(&caps);
+        assert_eq!(modes.len(), 3);
+        assert!(modes.iter().all(|m| m.dtd_border_reading.is_none()));
+        assert_eq!(ambiguous, 3);
+    }
+
+    #[test]
+    fn test_options_reach_every_dtd() {
+        use crate::model::options::{DtdBorderPolicy, DtdBorderReading};
+
+        let bytes = super::static_tests::edid_with_bordered_dtds();
+        let parsed = parse_edid(&bytes, STANDARD_HANDLERS).unwrap();
+        let options = DecodeOptions::new()
+            .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        let caps = capabilities_from_edid_with_options(
+            &parsed,
+            &ExtensionLibrary::with_standard_handlers(),
+            options,
+        );
+
+        // The base block, the extension's DTD and its VTB-EXT DTB all read 1.4.
+        let (modes, ambiguous) = bordered_modes_and_ambiguous(&caps);
+        assert_eq!(modes.len(), 3);
+        for mode in &modes {
+            assert_eq!(mode.dtd_border_reading, Some(DtdBorderReading::Edid14));
+        }
+        let mode_1440 = modes.iter().find(|m| m.height == 1440).unwrap();
+        assert_eq!(mode_1440.h_blank, Some(160));
+        assert_eq!(ambiguous, 0);
+    }
 
     // Verifies that with_standard_handlers() wires BaseBlockHandler into the pipeline.
     // Handler-level assertions live in base.rs and cea861.rs.
@@ -411,7 +491,7 @@ mod static_tests {
 
     /// A bordered DTD in the base block (1920×1080), in a CTA-861 extension's VTB-EXT data
     /// block (1280×720) and in its DTD area (2560×1440).
-    fn edid_with_bordered_dtds() -> [u8; 256] {
+    pub(super) fn edid_with_bordered_dtds() -> [u8; 256] {
         let mut bytes = [0u8; 256];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
         bytes[0x36..0x48].copy_from_slice(&bordered_dtd(14850, (1920, 280), (1080, 45), 88, 44));

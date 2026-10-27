@@ -168,6 +168,16 @@ impl ExtensionHandler for DisplayIdHandler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
+        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
+    }
+
+    fn process_with_options(
+        &self,
+        blocks: &[&[u8; 128]],
+        caps: &mut DisplayCapabilities,
+        warnings: &mut Vec<ParseWarning>,
+        options: &DecodeOptions,
+    ) {
         let Some(first) = blocks.first() else { return };
 
         let (version, _section_byte_count, product_type, extension_count) =
@@ -202,8 +212,8 @@ impl ExtensionHandler for DisplayIdHandler {
                 warnings.push(Arc::new(w));
             }
             let payload = fragment_payload(block);
-            process_data_blocks(payload, version, caps, &DecodeOptions::new());
-            scan_all_metadata_blocks(payload, version, caps, &mut did, warnings);
+            process_data_blocks(payload, version, caps, options);
+            scan_all_metadata_blocks(payload, version, caps, &mut did, warnings, options);
         }
 
         caps.set_extension_data(0x70, did);
@@ -560,41 +570,52 @@ mod tests {
         assert_eq!(caps.warnings(), [EdidWarning::DisplayIdChecksumMismatch]);
     }
 
+    /// A DisplayID 2.x block with a CTA DisplayID block whose collection holds a VTB-EXT
+    /// with one DTB: 1920×1080, blanking 280, front porch 88, sync 44, 8-pixel horizontal
+    /// borders.
+    fn displayid_with_bordered_vtb_ext() -> [u8; 128] {
+        // Extended tag data block (23 bytes): VTB-EXT, version 1, one DTB.
+        let vtb_ext_header = [0xE0 | 23, 0x03, 0x01, 0x01, 0x00, 0x00];
+        let dtb = [
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0, 0, 0, 0, 8, 0, 0x1E,
+        ];
+        let mut data_block = vec![TAG_V2_CTA_DISPLAYID, 0x00, 24];
+        data_block.extend_from_slice(&vtb_ext_header);
+        data_block.extend_from_slice(&dtb);
+        make_displayid_block(DISPLAYID_V2, &data_block)
+    }
+
+    #[test]
+    fn test_handler_applies_options_to_embedded_cta_dtds() {
+        use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
+
+        let block = displayid_with_bordered_vtb_ext();
+        let options = DecodeOptions::new()
+            .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        let mut caps = DisplayCapabilities::default();
+        let mut warnings: Vec<ParseWarning> = Vec::new();
+        ExtensionHandler::process_with_options(
+            &DisplayIdHandler,
+            &[&block],
+            &mut caps,
+            &mut warnings,
+            &options,
+        );
+
+        // The block is decoded for its modes and for its CTA metadata; both read 1.4, so
+        // they give one mode.
+        assert_eq!(caps.supported_modes.len(), 1);
+        let mode = &caps.supported_modes[0];
+        assert_eq!(mode.dtd_border_reading, Some(DtdBorderReading::Edid14));
+        assert_eq!(mode.h_blank, Some(280));
+        assert!(caps.warnings.is_empty() && warnings.is_empty());
+    }
+
     #[test]
     fn test_static_handler_applies_options_to_embedded_cta_dtds() {
         use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
 
-        // A CTA DisplayID block whose collection holds a VTB-EXT with one DTB: 1920×1080,
-        // blanking 280, front porch 88, sync 44, 8-pixel horizontal borders.
-        let vtb_ext = [
-            0xE0 | 23, // extended tag data block, 23 bytes
-            0x03,      // VTB-EXT
-            0x01,
-            0x01,
-            0x00,
-            0x00, // version 1, one DTB
-            0x02,
-            0x3A,
-            0x80,
-            0x18,
-            0x71,
-            0x38,
-            0x2D,
-            0x40,
-            88,
-            44,
-            0x45,
-            0x00,
-            0,
-            0,
-            0,
-            8,
-            0,
-            0x1E,
-        ];
-        let mut data_block = vec![TAG_V2_CTA_DISPLAYID, 0x00, vtb_ext.len() as u8];
-        data_block.extend_from_slice(&vtb_ext);
-        let block = make_displayid_block(DISPLAYID_V2, &data_block);
+        let block = displayid_with_bordered_vtb_ext();
 
         let options = DecodeOptions::new()
             .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));

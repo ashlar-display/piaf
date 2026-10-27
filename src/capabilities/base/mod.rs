@@ -71,14 +71,10 @@ impl ExtensionHandler for BaseBlockHandler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
-        self.decode(blocks, caps, warnings, &DecodeOptions::new());
+        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
     }
-}
 
-#[cfg(any(feature = "alloc", feature = "std"))]
-impl BaseBlockHandler {
-    // `process` with the run's options.
-    pub(crate) fn decode(
+    fn process_with_options(
         &self,
         blocks: &[&[u8; 128]],
         caps: &mut DisplayCapabilities,

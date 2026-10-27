@@ -4,6 +4,8 @@ use crate::model::capabilities::StaticContext;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::options::DecodeOptions;
+#[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Box, String, Vec};
 
 /// Processes one or more 128-byte EDID blocks and populates [`DisplayCapabilities`].
@@ -28,6 +30,25 @@ pub trait ExtensionHandler: core::fmt::Debug {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     );
+
+    /// [`process`][Self::process] with the caller's [`DecodeOptions`].
+    ///
+    /// [`capabilities_from_edid_with_options`][crate::capabilities_from_edid_with_options]
+    /// calls this, [`capabilities_from_edid`][crate::capabilities_from_edid] with the
+    /// default options. The default implementation ignores the options and calls
+    /// `process`. A handler that decodes data the options apply to (such as Detailed
+    /// Timing Descriptors) overrides it, and its `process` calls it with
+    /// [`DecodeOptions::new`].
+    fn process_with_options(
+        &self,
+        blocks: &[&[u8; 128]],
+        caps: &mut DisplayCapabilities,
+        warnings: &mut Vec<ParseWarning>,
+        options: &DecodeOptions,
+    ) {
+        let _ = options;
+        self.process(blocks, caps, warnings);
+    }
 }
 
 /// Processes one or more 128-byte EDID blocks in a no-alloc context.

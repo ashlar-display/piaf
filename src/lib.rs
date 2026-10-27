@@ -77,7 +77,6 @@ pub mod capabilities;
 pub use capabilities::Cea861Flags;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use capabilities::DisplayIdCapabilities;
-pub use capabilities::capabilities_from_edid;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use capabilities::{
     Audio3dChannels, Audio3dSpeakerAllocation, AudioFormat, AudioFormatInfo, AudioSampleRates,
@@ -92,4 +91,5 @@ pub use capabilities::{
 pub use capabilities::{
     CEA861_HANDLER, Cea861Handler, DISPLAYID_HANDLER, DisplayIdHandler, STANDARD_HANDLERS,
 };
+pub use capabilities::{capabilities_from_edid, capabilities_from_edid_with_options};
 pub use capabilities::{capabilities_from_edid_static, capabilities_from_edid_static_with_options};
