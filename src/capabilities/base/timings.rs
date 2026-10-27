@@ -2,6 +2,7 @@ use crate::model::capabilities::{
     DisplayCapabilities, ModeSink, ModeSource, StereoMode, SyncDefinition, VideoMode,
 };
 use crate::model::diagnostics::EdidWarning;
+use crate::model::options::{DtdBorderPolicy, DtdBorderReading};
 
 /// Decodes the established timings bitmap (bytes 0x23–0x25, 17 predefined modes).
 ///
@@ -67,6 +68,8 @@ pub(super) fn decode_standard_timings(base: &[u8; 128], sink: &mut dyn ModeSink)
 
 /// Parses a single 18-byte DTD slice into a `VideoMode`.
 ///
+/// The blanking is read with respect to the borders as `policy` says.
+///
 /// Non-fatal findings about a decoded mode ([`EdidWarning::DtdBordersAmbiguous`],
 /// [`EdidWarning::DtdBlankingInconsistent`]) go to `warn`; the mode is still returned.
 ///
@@ -76,6 +79,7 @@ pub(super) fn decode_standard_timings(base: &[u8; 128], sink: &mut dyn ModeSink)
 /// - `Err(w)` — [`EdidWarning::DtdSlotTooShort`] or [`EdidWarning::DtdPixelClockOverflow`]
 pub(crate) fn build_dtd_mode(
     dtd: &[u8],
+    policy: DtdBorderPolicy,
     warn: &mut dyn FnMut(EdidWarning),
 ) -> Result<Option<VideoMode>, EdidWarning> {
     if dtd.len() < 18 {
@@ -97,7 +101,24 @@ pub(crate) fn build_dtd_mode(
     if hactive == 0 || vactive == 0 || hblank == 0 || vblank == 0 {
         return Ok(None);
     }
-    let total_pixels = (hactive + hblank) as u32 * (vactive + vblank) as u32;
+
+    // Border (bytes 15–16): pixels/lines on each side of the active area.
+    let h_border = dtd[15];
+    let v_border = dtd[16];
+
+    // EDID 1.3 §3.12 counts the borders in the blanking, EDID 1.4 §3.12 does not. Unless the
+    // caller settled it, piaf reads 1.3, as EDIDs in practice do (warned below).
+    let reading = match policy {
+        DtdBorderPolicy::Unsettled => DtdBorderReading::Edid13,
+        DtdBorderPolicy::Fixed(reading) => reading,
+    };
+    // The borders on top of the blanking in each total: none under 1.3.
+    let (h_borders, v_borders) = match reading {
+        DtdBorderReading::Edid13 => (0, 0),
+        DtdBorderReading::Edid14 => (2 * u32::from(h_border), 2 * u32::from(v_border)),
+    };
+    let total_pixels = (u32::from(hactive) + u32::from(hblank) + h_borders)
+        * (u32::from(vactive) + u32::from(vblank) + v_borders);
     if total_pixels == 0 {
         return Ok(None);
     }
@@ -117,21 +138,18 @@ pub(crate) fn build_dtd_mode(
     let v_front_porch = ((((dtd[11] as u16) >> 2) & 0x03) << 4) | (((dtd[10] as u16) >> 4) & 0x0F);
     let v_sync_width = (((dtd[11] as u16) & 0x03) << 4) | ((dtd[10] as u16) & 0x0F);
 
-    // Border (bytes 15–16): pixels/lines on each side of the active area.
-    let h_border = dtd[15];
-    let v_border = dtd[16];
-
-    // EDID 1.3 §3.12 counts the borders in the blanking, EDID 1.4 §3.12 does not; EDIDs in
-    // practice follow 1.3, and so does the refresh rate above (line total = active +
-    // blanking). `VideoMode::h_blank` excludes the borders, so both come off. What is left
-    // must still hold the front porch and the sync pulse; when it does not, the 1.3
-    // reading is impossible and `h_blank` is not guessed.
-    if h_border != 0 || v_border != 0 {
+    // An unsettled reading is an assumption when there are borders: say so.
+    if policy == DtdBorderPolicy::Unsettled && (h_border != 0 || v_border != 0) {
         warn(EdidWarning::DtdBordersAmbiguous { h_border, v_border });
     }
-    let h_blank = hblank
-        .checked_sub(2 * u16::from(h_border))
-        .filter(|&b| b >= h_front_porch + h_sync_width);
+    // `VideoMode::h_blank` excludes the borders: under 1.3 both come off the blanking,
+    // under 1.4 it is the blanking. It must still hold the front porch and the sync pulse;
+    // when it does not, the reading is impossible and `h_blank` is not guessed.
+    let h_blank = match reading {
+        DtdBorderReading::Edid13 => hblank.checked_sub(2 * u16::from(h_border)),
+        DtdBorderReading::Edid14 => Some(hblank),
+    }
+    .filter(|&b| b >= h_front_porch + h_sync_width);
     if h_blank.is_none() {
         warn(EdidWarning::DtdBlankingInconsistent {
             blanking: hblank,
@@ -193,9 +211,13 @@ pub(crate) fn build_dtd_mode(
         stereo,
         sync,
     );
-    Ok(Some(match h_blank {
+    let mode = match h_blank {
         Some(h_blank) => mode.with_h_blank(h_blank),
         None => mode,
+    };
+    Ok(Some(match policy {
+        DtdBorderPolicy::Unsettled => mode,
+        DtdBorderPolicy::Fixed(reading) => mode.with_dtd_border_reading(reading),
     }))
 }
 
@@ -209,7 +231,9 @@ pub(crate) fn build_dtd_mode(
 /// This is `pub(crate)` so that the CEA-861 handler can reuse it for DTDs in extension blocks.
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub(crate) fn decode_dtd_slot(dtd: &[u8], caps: &mut DisplayCapabilities, dtd_index: u8) {
-    let mode = match build_dtd_mode(dtd, &mut |w| caps.push_warning(w)) {
+    let mode = match build_dtd_mode(dtd, DtdBorderPolicy::Unsettled, &mut |w| {
+        caps.push_warning(w)
+    }) {
         Err(w) => {
             caps.push_warning(w);
             return;
@@ -250,7 +274,9 @@ pub(crate) fn decode_dtd_slot(dtd: &[u8], caps: &mut DisplayCapabilities, dtd_in
 /// This is `pub(crate)` so that the CEA-861 handler can use it for DTDs in extension blocks
 /// in no-alloc builds.
 pub(crate) fn decode_dtd_slot_into_sink(dtd: &[u8], sink: &mut dyn ModeSink, dtd_index: u8) {
-    match build_dtd_mode(dtd, &mut |w| sink.push_warning(w)) {
+    match build_dtd_mode(dtd, DtdBorderPolicy::Unsettled, &mut |w| {
+        sink.push_warning(w)
+    }) {
         Err(w) => sink.push_warning(w),
         Ok(None) => {}
         Ok(Some(mode)) => sink.push_mode(mode.with_source(ModeSource::DtdIndex(dtd_index))),
@@ -276,6 +302,7 @@ mod tests {
     use crate::model::capabilities::{DisplayCapabilities, RefreshRate, VideoMode};
     use crate::model::diagnostics::EdidWarning;
     use crate::model::extension::ExtensionHandler;
+    use crate::model::options::{DtdBorderPolicy, DtdBorderReading};
     use crate::model::prelude::Vec;
 
     #[test]
@@ -608,6 +635,8 @@ mod tests {
         assert_eq!(mode.h_border, 8);
         // The refresh rate takes the same reading: 148.5 MHz / (2200 × 1125) = 60 Hz.
         assert_eq!(mode.refresh_rate, Some(RefreshRate::integral(60)));
+        // An assumption, not a settled reading.
+        assert_eq!(mode.dtd_border_reading, None);
         assert_eq!(
             borders_warnings(&caps),
             [EdidWarning::DtdBordersAmbiguous {
@@ -691,6 +720,83 @@ mod tests {
                 EdidWarning::DtdBlankingInconsistent { .. }
             ]
         ));
+    }
+
+    /// Decodes the DTD of `base_with_bordered_1080p` under `policy`.
+    fn decode_dtd(base: &[u8; 128], policy: DtdBorderPolicy) -> (VideoMode, Vec<EdidWarning>) {
+        let mut warnings = Vec::new();
+        let mode = super::build_dtd_mode(&base[0x36..0x48], policy, &mut |w| warnings.push(w))
+            .unwrap()
+            .unwrap();
+        (mode, warnings)
+    }
+
+    #[test]
+    fn test_dtd_fixed_edid_1_4_puts_borders_outside_the_blanking() {
+        let policy = DtdBorderPolicy::Fixed(DtdBorderReading::Edid14);
+        let (mode, warnings) = decode_dtd(&base_with_bordered_1080p(8, 2), policy);
+        // The 280 of blanking exclude the borders.
+        assert_eq!(mode.h_blank, Some(280));
+        // 148.5 MHz / ((1920 + 280 + 16) × (1080 + 45 + 4)) = 59.35 Hz, in whole hertz.
+        assert_eq!(mode.refresh_rate, Some(RefreshRate::integral(59)));
+        assert_eq!(mode.dtd_border_reading, Some(DtdBorderReading::Edid14));
+        // Settled, so not ambiguous.
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_dtd_fixed_edid_1_3_matches_unsettled_without_the_warning() {
+        let base = base_with_bordered_1080p(8, 2);
+        let (fixed, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(DtdBorderReading::Edid13));
+        let (unsettled, _) = decode_dtd(&base, DtdBorderPolicy::Unsettled);
+        assert_eq!(fixed.h_blank, Some(264));
+        assert_eq!(fixed.dtd_border_reading, Some(DtdBorderReading::Edid13));
+        assert_eq!(
+            fixed,
+            unsettled.with_dtd_border_reading(DtdBorderReading::Edid13)
+        );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_dtd_fixed_edid_1_4_fits_where_edid_1_3_cannot() {
+        // 2 × 150 > 280 under 1.3; under 1.4 the blanking holds porch 88 and sync 44.
+        let base = base_with_bordered_1080p(150, 0);
+        let (mode, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        assert_eq!(mode.h_blank, Some(280));
+        assert!(warnings.is_empty());
+
+        let (mode, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(DtdBorderReading::Edid13));
+        assert_eq!(mode.h_blank, None);
+        assert!(matches!(
+            warnings[..],
+            [EdidWarning::DtdBlankingInconsistent { .. }]
+        ));
+    }
+
+    #[test]
+    fn test_dtd_fixed_edid_1_4_still_checks_porch_and_sync() {
+        // Front porch 200 + sync 100 do not fit a blanking of 280 under either reading.
+        let mut base = base_with_bordered_1080p(8, 0);
+        base[0x3E] = 200;
+        base[0x3F] = 100;
+        let (mode, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        assert_eq!(mode.h_blank, None);
+        assert!(matches!(
+            warnings[..],
+            [EdidWarning::DtdBlankingInconsistent { blanking: 280, .. }]
+        ));
+    }
+
+    #[test]
+    fn test_dtd_without_borders_is_the_same_under_every_policy() {
+        let base = base_with_bordered_1080p(0, 0);
+        let (unsettled, _) = decode_dtd(&base, DtdBorderPolicy::Unsettled);
+        for reading in [DtdBorderReading::Edid13, DtdBorderReading::Edid14] {
+            let (fixed, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(reading));
+            assert_eq!(fixed, unsettled.clone().with_dtd_border_reading(reading));
+            assert!(warnings.is_empty());
+        }
     }
 
     #[test]

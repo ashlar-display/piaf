@@ -2,6 +2,7 @@ use crate::capabilities::base::timings::build_dtd_mode;
 use crate::capabilities::displayid::decode_type_vii_descriptor_to_mode;
 use crate::model::capabilities::VideoMode;
 use crate::model::diagnostics::EdidWarning;
+use crate::model::options::DtdBorderPolicy;
 use crate::model::prelude::Vec;
 pub use display_types::cea861::colorimetry::{ColorimetryBlock, ColorimetryFlags};
 pub use display_types::cea861::hdmi_forum::{
@@ -876,7 +877,11 @@ pub(super) fn parse_vtb_ext(
 
     // Detailed Timing Blocks (18 bytes each)
     for i in 0..w {
-        match build_dtd_mode(&data[i * 18..(i + 1) * 18], warn) {
+        match build_dtd_mode(
+            &data[i * 18..(i + 1) * 18],
+            DtdBorderPolicy::Unsettled,
+            warn,
+        ) {
             Ok(Some(mode)) if !timings.contains(&mode) => timings.push(mode),
             Ok(_) => {}
             Err(w) => warn(w),

@@ -20,6 +20,10 @@ pub mod diagnostics;
 pub use diagnostics::ParseWarning;
 pub use diagnostics::{EdidError, EdidWarning};
 
+/// Decoding options.
+pub mod options;
+pub use options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
+
 /// Private warning storage.
 pub(crate) mod warnings;
 
