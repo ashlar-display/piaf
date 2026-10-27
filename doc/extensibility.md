@@ -42,6 +42,10 @@ impl ExtensionHandler for MyHandler {
 }
 ```
 
+The pipeline calls each handler through `process_with_options`, which also receives the
+caller's `DecodeOptions` (see [Decode options](#decode-options)). Its default implementation
+ignores them and calls `process`.
+
 ### `StaticExtensionHandler` (static, all tiers)
 
 `StaticExtensionHandler` is the no-alloc counterpart for bare `no_std` builds. It uses
@@ -141,9 +145,40 @@ directly (no boxing required):
 ctx.push_warning(EdidWarning::MalformedDataBlock);
 ```
 
+## Decode options
+
+`capabilities_from_edid_with_options` and `capabilities_from_edid_static_with_options` take
+the caller's `DecodeOptions`; the functions without the suffix use the defaults. The options
+reach every handler, so one setting covers the whole EDID. A handler that decodes data the
+options apply to (such as Detailed Timing Descriptors, for `dtd_border_policy`) should apply
+them too:
+
+- a dynamic handler overrides `process_with_options` and has `process` call it with
+  `DecodeOptions::new()`;
+- a static handler reads them from `StaticContext::options()`.
+
+```rust
+impl ExtensionHandler for MyHandler {
+    fn process(&self, blocks: &[&[u8; 128]], caps: &mut DisplayCapabilities, warnings: &mut Vec<ParseWarning>) {
+        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
+    }
+
+    fn process_with_options(
+        &self,
+        blocks: &[&[u8; 128]],
+        caps: &mut DisplayCapabilities,
+        warnings: &mut Vec<ParseWarning>,
+        options: &DecodeOptions,
+    ) {
+        // Decode, applying `options`.
+    }
+}
+```
+
 ## `no_std` support
 
-`ExtensionHandler` and `ExtensionLibrary` require `alloc` or `std`. `StaticExtensionHandler`
-and `capabilities_from_edid_static` are available unconditionally at all build tiers.
+`ExtensionHandler` and `ExtensionLibrary` require `alloc` or `std`. `StaticExtensionHandler`,
+`capabilities_from_edid_static`, `capabilities_from_edid_static_with_options` and
+`DecodeOptions` are available unconditionally at all build tiers.
 
 See [`doc/static-pipeline.md`](static-pipeline.md) for full details on the no-alloc pipeline.

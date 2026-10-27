@@ -178,6 +178,11 @@ All other fields (`pixel_clock_khz`, `h_front_porch`, `h_sync_width`, etc.) defa
 `None` / `0` when not set via `with_detailed_timing`. This matches the sparse data available from non-DTD sources
 such as SVDs and standard timing entries.
 
+`dtd_border_reading` is `Some` only when the caller settled the reading of a DTD's borders
+with `DtdBorderPolicy::Fixed`: the mode's refresh rate and `h_blank` follow that reading.
+`None` means it was not settled; for a DTD with borders, piaf then read EDID 1.3 and emitted
+`DtdBordersAmbiguous`, and a consumer may need to consider the 1.4 reading as well.
+
 Modes beyond capacity are silently dropped. Warnings beyond `MAX_STATIC_WARNINGS` are not
 stored but counted in `warnings_dropped()`. 64 is a reasonable default for `MAX_MODES`.
 

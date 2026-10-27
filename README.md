@@ -165,6 +165,36 @@ let caps: StaticDisplayCapabilities<64> =
 Static handlers extract modes only — audio, VSDB, colorimetry, and similar rich metadata
 require the dynamic pipeline.
 
+## Decode options
+
+Where EDID data allows more than one reading, piaf takes the one EDIDs follow in practice
+and warns. `DecodeOptions` lets the caller settle the reading instead; both pipelines take
+them, through `capabilities_from_edid_with_options` and
+`capabilities_from_edid_static_with_options`, and apply them to every block of the EDID.
+
+The first option is the reading of a Detailed Timing Descriptor's borders. EDID 1.3 counts
+them in the blanking, EDID 1.4 does not, which changes the refresh rate and `h_blank` of a
+DTD with borders. By default piaf reads 1.3 and emits `DtdBordersAmbiguous`;
+`DtdBorderPolicy::Fixed` applies the given reading, records it in
+`VideoMode::dtd_border_reading` and drops the warning:
+
+```rust
+use piaf::{
+    capabilities_from_edid_with_options, parse_edid, DecodeOptions, DtdBorderPolicy,
+    DtdBorderReading, ExtensionLibrary,
+};
+
+let library = ExtensionLibrary::with_standard_handlers();
+let parsed = parse_edid(&bytes, &library)?;
+let options = DecodeOptions::new()
+    .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+let caps = capabilities_from_edid_with_options(&parsed, &library, options);
+```
+
+EDIDs in practice use the 1.3 reading whatever version they declare, so the declared
+version is not evidence of it. To follow it anyway, read it from the base block and set
+`Fixed`; the `DtdBorderPolicy` documentation shows how.
+
 ## Features
 
 | Feature | Default | Description                                              |

@@ -123,6 +123,9 @@ pipelines do this work:
   blocks are processed even in bare `no_std` — the borrowed slice requires no allocator.
 
 Both pipelines share all internal parsing logic through the `ModeSink` trait abstraction.
+Each has a `_with_options` form that takes the caller's `DecodeOptions`, which settle readings
+the data leaves ambiguous (such as whether a DTD's blanking includes its borders); the options
+reach every handler, so one setting covers the whole EDID.
 
 Normalization does not invent data. If a field cannot be reliably determined, it is left absent
 rather than filled with a default.

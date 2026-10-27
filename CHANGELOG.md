@@ -56,11 +56,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`EdidWarning::DtdBordersAmbiguous`** for a Detailed Timing Descriptor with non-zero
   borders. EDID 1.3 counts the borders in the blanking, EDID 1.4 does not; piaf reads
   them as 1.3 (as EDIDs in practice do, and as its refresh rate already did), so
-  `h_blank` is the blanking minus both borders, and the warning says so.
+  `h_blank` is the blanking minus both borders, and the warning says so. Not emitted when
+  the caller fixes the reading (below).
 - **`EdidWarning::DtdBlankingInconsistent`** when that reading leaves less than the front
   porch and sync pulse (or, without borders, the blanking is too short for them): the
-  mode is kept with `h_blank` left `None`, and the warning carries the raw values for a
-  caller that applies the EDID 1.4 reading itself.
+  mode is kept with `h_blank` left `None`, and the warning carries the raw values. The
+  check applies to whichever reading is taken.
+- **Decode options.** `DecodeOptions` (`#[non_exhaustive]`, the same in every build) lets
+  the caller settle readings the data leaves ambiguous, for the whole EDID:
+  `capabilities_from_edid_with_options` and `capabilities_from_edid_static_with_options`
+  take them, and the functions without the suffix use the defaults. Handlers receive them
+  through the new `ExtensionHandler::process_with_options` (provided: it calls `process`,
+  so existing handlers are unaffected) and `StaticContext::options()` (set with
+  `StaticContext::with_options`).
+  - The first option is `dtd_border_policy` (`DtdBorderPolicy`): `Unsettled`, the default,
+    reads EDID 1.3 and warns as above; `Fixed(DtdBorderReading::Edid13 | Edid14)` applies
+    that reading to every Detailed Timing Descriptor (base block, CTA-861 extensions,
+    VTB-EXT, and CTA blocks inside DisplayID), records it in
+    `VideoMode::dtd_border_reading` (display-types 0.5), and emits no
+    `DtdBordersAmbiguous`. Under EDID 1.4 the line and frame totals include both borders,
+    so the refresh rate is lower, and `h_blank` is the blanking. `DtdBorderReading` is
+    re-exported. The declared EDID version is not evidence of the reading; its
+    documentation shows how to follow it anyway.
 
 ### Changed
 
