@@ -2,7 +2,7 @@ use crate::model::capabilities::{
     DisplayCapabilities, ModeSink, ModeSource, StereoMode, SyncDefinition, VideoMode,
 };
 use crate::model::diagnostics::EdidWarning;
-use crate::model::options::{DtdBorderPolicy, DtdBorderReading};
+use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
 
 /// Decodes the established timings bitmap (bytes 0x23–0x25, 17 predefined modes).
 ///
@@ -230,8 +230,13 @@ pub(crate) fn build_dtd_mode(
 ///
 /// This is `pub(crate)` so that the CEA-861 handler can reuse it for DTDs in extension blocks.
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub(crate) fn decode_dtd_slot(dtd: &[u8], caps: &mut DisplayCapabilities, dtd_index: u8) {
-    let mode = match build_dtd_mode(dtd, DtdBorderPolicy::Unsettled, &mut |w| {
+pub(crate) fn decode_dtd_slot(
+    dtd: &[u8],
+    caps: &mut DisplayCapabilities,
+    dtd_index: u8,
+    options: &DecodeOptions,
+) {
+    let mode = match build_dtd_mode(dtd, options.dtd_border_policy, &mut |w| {
         caps.push_warning(w)
     }) {
         Err(w) => {
@@ -273,8 +278,13 @@ pub(crate) fn decode_dtd_slot(dtd: &[u8], caps: &mut DisplayCapabilities, dtd_in
 ///
 /// This is `pub(crate)` so that the CEA-861 handler can use it for DTDs in extension blocks
 /// in no-alloc builds.
-pub(crate) fn decode_dtd_slot_into_sink(dtd: &[u8], sink: &mut dyn ModeSink, dtd_index: u8) {
-    match build_dtd_mode(dtd, DtdBorderPolicy::Unsettled, &mut |w| {
+pub(crate) fn decode_dtd_slot_into_sink(
+    dtd: &[u8],
+    sink: &mut dyn ModeSink,
+    dtd_index: u8,
+    options: &DecodeOptions,
+) {
+    match build_dtd_mode(dtd, options.dtd_border_policy, &mut |w| {
         sink.push_warning(w)
     }) {
         Err(w) => sink.push_warning(w),
@@ -288,10 +298,14 @@ pub(crate) fn decode_dtd_slot_into_sink(dtd: &[u8], sink: &mut dyn ModeSink, dtd
 // Called by capabilities_from_edid_static (step 6). The alloc BaseBlockHandler uses
 // decode_dtd_slot directly to preserve preferred_image_size_mm and upgrade-in-place semantics.
 #[allow(dead_code)]
-pub(super) fn decode_detailed_timings(base: &[u8; 128], sink: &mut dyn ModeSink) {
+pub(super) fn decode_detailed_timings(
+    base: &[u8; 128],
+    sink: &mut dyn ModeSink,
+    options: &DecodeOptions,
+) {
     for i in 0..4u8 {
         let offset = 0x36 + (i as usize * 18);
-        decode_dtd_slot_into_sink(&base[offset..offset + 18], sink, i);
+        decode_dtd_slot_into_sink(&base[offset..offset + 18], sink, i, options);
     }
 }
 
@@ -302,7 +316,7 @@ mod tests {
     use crate::model::capabilities::{DisplayCapabilities, RefreshRate, VideoMode};
     use crate::model::diagnostics::EdidWarning;
     use crate::model::extension::ExtensionHandler;
-    use crate::model::options::{DtdBorderPolicy, DtdBorderReading};
+    use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
     use crate::model::prelude::Vec;
 
     #[test]
@@ -710,7 +724,7 @@ mod tests {
         }
         let base = base_with_bordered_1080p(80, 2); // ambiguous, and 280 − 160 < 132
         let mut sink = Collect::default();
-        super::decode_dtd_slot_into_sink(&base[0x36..0x48], &mut sink, 0);
+        super::decode_dtd_slot_into_sink(&base[0x36..0x48], &mut sink, 0, &DecodeOptions::new());
         assert_eq!(sink.1.len(), 1);
         assert_eq!(sink.1[0].h_blank, None);
         assert!(matches!(

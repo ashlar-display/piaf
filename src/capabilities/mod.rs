@@ -43,6 +43,7 @@ use crate::model::capabilities::{DisplayCapabilities, ModeSink, StaticDisplayCap
 use crate::model::diagnostics::ParseWarning;
 use crate::model::edid::EdidSource;
 use crate::model::extension::{ExtensionLibrary, StaticExtensionHandler};
+use crate::model::options::DecodeOptions;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Box, Vec};
 
@@ -149,9 +150,25 @@ pub fn capabilities_from_edid<T: EdidSource>(
 ///
 /// This function is a replacement for [`capabilities_from_edid`], not a complement —
 /// calling both on the same EDID will process extension blocks twice.
+///
+/// Decodes with the default [`DecodeOptions`]; see
+/// [`capabilities_from_edid_static_with_options`] to settle ambiguous readings.
 pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
     parsed: &T,
     handlers: &[&dyn StaticExtensionHandler],
+) -> StaticDisplayCapabilities<N> {
+    capabilities_from_edid_static_with_options(parsed, handlers, DecodeOptions::new())
+}
+
+/// [`capabilities_from_edid_static`] with the caller's [`DecodeOptions`].
+///
+/// The options apply to the base block and reach every handler through
+/// [`StaticContext::options`][crate::StaticContext::options], so one setting covers the whole EDID. A custom handler
+/// applies them to the data it decodes.
+pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>(
+    parsed: &T,
+    handlers: &[&dyn StaticExtensionHandler],
+    options: DecodeOptions,
 ) -> StaticDisplayCapabilities<N> {
     // Step 1 — Decode the base block into a temporary DisplayCapabilities.
     // This gives us all scalar fields and preferred_image_size_mm "for free" from the
@@ -168,9 +185,8 @@ pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
 
     #[cfg(any(feature = "alloc", feature = "std"))]
     {
-        use crate::model::extension::ExtensionHandler;
         let mut w: Vec<ParseWarning> = Vec::new();
-        base::BaseBlockHandler.process(&[parsed.base_block()], &mut base_caps, &mut w);
+        base::BaseBlockHandler.decode(&[parsed.base_block()], &mut base_caps, &mut w, &options);
         // base_caps now holds scalar fields, preferred_image_size_mm, and supported_modes.
         // The base block's warnings are `EdidWarning`s behind `Arc<dyn Error>`; copy them
         // into the static output, as the bare no_std path below records them directly.
@@ -230,7 +246,7 @@ pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
     #[cfg(not(any(feature = "alloc", feature = "std")))]
     {
         // No supported_modes in bare no_std DisplayCapabilities; call ungated functions directly.
-        base::decode_base_modes(parsed.base_block(), &mut caps);
+        base::decode_base_modes(parsed.base_block(), &mut caps, &options);
     }
 
     // Step 4 — Dispatch extension blocks to the static handler slice.
@@ -251,7 +267,7 @@ pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
                 .filter(|b| b[0] == handler.tag())
                 .collect();
             if !blocks.is_empty() {
-                let mut ctx = StaticContext::new(&mut caps);
+                let mut ctx = StaticContext::new(&mut caps).with_options(options);
                 handler.process(&blocks, &mut ctx);
             }
         }
@@ -262,7 +278,7 @@ pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
         use crate::model::capabilities::StaticContext;
         for ext in parsed.extension_blocks() {
             if let Some(handler) = handlers.iter().find(|h| h.tag() == ext[0]) {
-                let mut ctx = StaticContext::new(&mut caps);
+                let mut ctx = StaticContext::new(&mut caps).with_options(options);
                 handler.process(&[ext], &mut ctx);
             }
         }
@@ -373,5 +389,94 @@ mod static_tests {
         // 3 unknown extensions and the base block's `InvalidManufacturerId` did not fit,
         // whether the parser (bare no_std) or the static output (alloc) dropped them.
         assert_eq!(caps.warnings_dropped(), 4);
+    }
+
+    /// An 18-byte DTD with 2-pixel horizontal borders, V front porch 4 and V sync 5.
+    fn bordered_dtd(clk: u16, h: (u16, u16), v: (u16, u16), fp: u8, sync: u8) -> [u8; 18] {
+        let mut d = [0u8; 18];
+        d[..2].copy_from_slice(&clk.to_le_bytes());
+        d[2] = h.0 as u8;
+        d[3] = h.1 as u8;
+        d[4] = ((h.0 >> 8) as u8) << 4 | (h.1 >> 8) as u8;
+        d[5] = v.0 as u8;
+        d[6] = v.1 as u8;
+        d[7] = ((v.0 >> 8) as u8) << 4 | (v.1 >> 8) as u8;
+        d[8] = fp;
+        d[9] = sync;
+        d[10] = 0x45;
+        d[15] = 2;
+        d[17] = 0x1E;
+        d
+    }
+
+    /// A bordered DTD in the base block (1920×1080), in a CTA-861 extension's VTB-EXT data
+    /// block (1280×720) and in its DTD area (2560×1440).
+    fn edid_with_bordered_dtds() -> [u8; 256] {
+        let mut bytes = [0u8; 256];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x36..0x48].copy_from_slice(&bordered_dtd(14850, (1920, 280), (1080, 45), 88, 44));
+        bytes[126] = 1;
+        let ext = &mut bytes[128..];
+        ext[..4].copy_from_slice(&[0x02, 0x03, 28, 0]); // DTDs from byte 28
+        // Extended tag data block (tag 7, 23 bytes): VTB-EXT, version 1, one DTB.
+        ext[4..10].copy_from_slice(&[0xE0 | 23, 0x03, 0x01, 0x01, 0x00, 0x00]);
+        ext[10..28].copy_from_slice(&bordered_dtd(7425, (1280, 370), (720, 30), 110, 40));
+        ext[28..46].copy_from_slice(&bordered_dtd(24150, (2560, 160), (1440, 41), 48, 32));
+        for block in bytes.chunks_exact_mut(128) {
+            let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            block[127] = 0u8.wrapping_sub(sum);
+        }
+        bytes
+    }
+
+    // VTB-EXT is decoded in alloc builds only.
+    const BORDERED_MODES: usize = if cfg!(any(feature = "alloc", feature = "std")) {
+        3
+    } else {
+        2
+    };
+
+    fn ambiguous_warnings<const N: usize>(caps: &StaticDisplayCapabilities<N>) -> usize {
+        caps.iter_warnings()
+            .filter(|w| matches!(w, EdidWarning::DtdBordersAmbiguous { .. }))
+            .count()
+    }
+
+    #[test]
+    fn test_static_pipeline_default_options_leave_border_reading_unsettled() {
+        let bytes = edid_with_bordered_dtds();
+        let parsed = parse_edid(&bytes, STANDARD_HANDLERS).unwrap();
+        let caps = capabilities_from_edid_static::<16, _>(&parsed, STANDARD_HANDLERS);
+
+        let bordered: usize = caps.iter_modes().filter(|m| m.h_border == 2).count();
+        assert_eq!(bordered, BORDERED_MODES);
+        assert!(caps.iter_modes().all(|m| m.dtd_border_reading.is_none()));
+        assert_eq!(ambiguous_warnings(&caps), BORDERED_MODES);
+    }
+
+    #[test]
+    fn test_static_pipeline_options_reach_every_dtd() {
+        use crate::model::options::{DtdBorderPolicy, DtdBorderReading};
+
+        let bytes = edid_with_bordered_dtds();
+        let parsed = parse_edid(&bytes, STANDARD_HANDLERS).unwrap();
+        let options = DecodeOptions::new()
+            .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        let caps = capabilities_from_edid_static_with_options::<16, _>(
+            &parsed,
+            STANDARD_HANDLERS,
+            options,
+        );
+
+        // The base block, the extension's DTD and (alloc) its VTB-EXT DTB all read 1.4.
+        let settled = caps
+            .iter_modes()
+            .filter(|m| m.h_border == 2)
+            .inspect(|m| assert_eq!(m.dtd_border_reading, Some(DtdBorderReading::Edid14)))
+            .count();
+        assert_eq!(settled, BORDERED_MODES);
+        let mode_1440 = caps.iter_modes().find(|m| m.height == 1440).unwrap();
+        assert_eq!(mode_1440.h_blank, Some(160));
+        assert_eq!(ambiguous_warnings(&caps), 0);
     }
 }

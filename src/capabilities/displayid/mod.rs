@@ -11,6 +11,8 @@ use crate::model::diagnostics::ParseWarning;
 use crate::model::extension::ExtensionHandler;
 use crate::model::extension::StaticExtensionHandler;
 #[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::options::DecodeOptions;
+#[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Arc, Vec};
 
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -200,7 +202,7 @@ impl ExtensionHandler for DisplayIdHandler {
                 warnings.push(Arc::new(w));
             }
             let payload = fragment_payload(block);
-            process_data_blocks(payload, version, caps);
+            process_data_blocks(payload, version, caps, &DecodeOptions::new());
             scan_all_metadata_blocks(payload, version, caps, &mut did, warnings);
         }
 
@@ -241,11 +243,12 @@ impl StaticExtensionHandler for DisplayIdHandler {
         }
 
         // Process data blocks from all fragments.
+        let options = *ctx.options();
         for block in blocks {
             if let Some(w) = check_displayid_section(block) {
                 ctx.push_warning(w);
             }
-            process_data_blocks(fragment_payload(block), version, ctx);
+            process_data_blocks(fragment_payload(block), version, ctx, &options);
         }
     }
 }
@@ -555,6 +558,54 @@ mod tests {
         let mut ctx = crate::model::StaticContext::new(&mut caps);
         StaticExtensionHandler::process(&DisplayIdHandler, &[&block], &mut ctx);
         assert_eq!(caps.warnings(), [EdidWarning::DisplayIdChecksumMismatch]);
+    }
+
+    #[test]
+    fn test_static_handler_applies_options_to_embedded_cta_dtds() {
+        use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
+
+        // A CTA DisplayID block whose collection holds a VTB-EXT with one DTB: 1920×1080,
+        // blanking 280, front porch 88, sync 44, 8-pixel horizontal borders.
+        let vtb_ext = [
+            0xE0 | 23, // extended tag data block, 23 bytes
+            0x03,      // VTB-EXT
+            0x01,
+            0x01,
+            0x00,
+            0x00, // version 1, one DTB
+            0x02,
+            0x3A,
+            0x80,
+            0x18,
+            0x71,
+            0x38,
+            0x2D,
+            0x40,
+            88,
+            44,
+            0x45,
+            0x00,
+            0,
+            0,
+            0,
+            8,
+            0,
+            0x1E,
+        ];
+        let mut data_block = vec![TAG_V2_CTA_DISPLAYID, 0x00, vtb_ext.len() as u8];
+        data_block.extend_from_slice(&vtb_ext);
+        let block = make_displayid_block(DISPLAYID_V2, &data_block);
+
+        let options = DecodeOptions::new()
+            .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        let mut caps = crate::model::StaticDisplayCapabilities::<4>::default();
+        let mut ctx = crate::model::StaticContext::new(&mut caps).with_options(options);
+        StaticExtensionHandler::process(&DisplayIdHandler, &[&block], &mut ctx);
+
+        let mode = caps.iter_modes().next().unwrap();
+        assert_eq!(mode.dtd_border_reading, Some(DtdBorderReading::Edid14));
+        assert_eq!(mode.h_blank, Some(280));
+        assert!(caps.warnings().is_empty());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use crate::model::diagnostics::EdidWarning;
 use crate::model::manufacture::{ManufacturerId, MonitorString};
+use crate::model::options::DecodeOptions;
 use crate::model::warnings::InlineWarnings;
 
 pub use display_types::{
@@ -30,17 +31,34 @@ pub trait ModeSink {
 /// This allows the context to grow over time — additional sink types can be added as
 /// `Option` fields without changing the handler trait signature.
 ///
-/// Currently wraps a [`ModeSink`] for video mode and warning output. Future fields will
-/// provide access to identity, colorimetry, and other sink types as the static pipeline
-/// is extended.
+/// Currently wraps a [`ModeSink`] for video mode and warning output, and the run's
+/// [`DecodeOptions`]. Future fields will provide access to identity, colorimetry, and other
+/// sink types as the static pipeline is extended.
 pub struct StaticContext<'a> {
     modes: &'a mut dyn ModeSink,
+    options: DecodeOptions,
 }
 
 impl<'a> StaticContext<'a> {
-    /// Creates a new context backed by `modes`.
+    /// Creates a new context backed by `modes`, with the default [`DecodeOptions`].
     pub fn new(modes: &'a mut dyn ModeSink) -> Self {
-        Self { modes }
+        Self {
+            modes,
+            options: DecodeOptions::new(),
+        }
+    }
+
+    /// Sets the decode options, returning the updated context.
+    pub fn with_options(mut self, options: DecodeOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// The options the caller decodes with. A handler applies them to the data it decodes,
+    /// e.g. [`dtd_border_policy`][DecodeOptions::dtd_border_policy] to any Detailed Timing
+    /// Descriptor in its blocks.
+    pub fn options(&self) -> &DecodeOptions {
+        &self.options
     }
 
     /// Pushes a decoded video mode. Duplicate modes are silently ignored.

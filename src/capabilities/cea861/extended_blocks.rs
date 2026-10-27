@@ -2,7 +2,7 @@ use crate::capabilities::base::timings::build_dtd_mode;
 use crate::capabilities::displayid::decode_type_vii_descriptor_to_mode;
 use crate::model::capabilities::VideoMode;
 use crate::model::diagnostics::EdidWarning;
-use crate::model::options::DtdBorderPolicy;
+use crate::model::options::DecodeOptions;
 use crate::model::prelude::Vec;
 pub use display_types::cea861::colorimetry::{ColorimetryBlock, ColorimetryFlags};
 pub use display_types::cea861::hdmi_forum::{
@@ -851,6 +851,7 @@ pub(super) fn parse_vesa_display_device(block_data: &[u8]) -> Option<VesaDisplay
 /// The Detailed Timing Blocks are decoded like any other DTD; their warnings go to `warn`.
 pub(super) fn parse_vtb_ext(
     block_data: &[u8],
+    options: &DecodeOptions,
     warn: &mut dyn FnMut(EdidWarning),
 ) -> Option<VtbExtBlock> {
     // Payload layout (after the extended tag byte):
@@ -877,11 +878,7 @@ pub(super) fn parse_vtb_ext(
 
     // Detailed Timing Blocks (18 bytes each)
     for i in 0..w {
-        match build_dtd_mode(
-            &data[i * 18..(i + 1) * 18],
-            DtdBorderPolicy::Unsettled,
-            warn,
-        ) {
+        match build_dtd_mode(&data[i * 18..(i + 1) * 18], options.dtd_border_policy, warn) {
             Ok(Some(mode)) if !timings.contains(&mode) => timings.push(mode),
             Ok(_) => {}
             Err(w) => warn(w),
@@ -1390,7 +1387,7 @@ mod tests {
     fn test_vtb_ext_empty_version_only() {
         // version=1, 0 DTBs, 0 CVTs, 0 STs
         let data = [0x01u8, 0x00, 0x00, 0x00];
-        let vtb = parse_vtb_ext(&data, &mut |_| {}).unwrap();
+        let vtb = parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).unwrap();
         assert_eq!(vtb.version, 1);
         assert!(vtb.timings.is_empty());
     }
@@ -1398,7 +1395,7 @@ mod tests {
     #[test]
     fn test_vtb_ext_too_short_returns_none() {
         let data = [0x01u8, 0x00, 0x00];
-        assert!(parse_vtb_ext(&data, &mut |_| {}).is_none());
+        assert!(parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).is_none());
     }
 
     /// A VTB-EXT payload with one Detailed Timing Block: 1920×1080, 148.50 MHz, blanking
@@ -1418,7 +1415,12 @@ mod tests {
     fn test_vtb_ext_dtb_keeps_detailed_timing() {
         // The DTBs used a decoder of their own that dropped everything but the identity.
         let mut warnings = Vec::new();
-        let vtb = parse_vtb_ext(&vtb_ext_with_1080p_dtb(0), &mut |w| warnings.push(w)).unwrap();
+        let vtb = parse_vtb_ext(
+            &vtb_ext_with_1080p_dtb(0),
+            &DecodeOptions::new(),
+            &mut |w| warnings.push(w),
+        )
+        .unwrap();
         let m = &vtb.timings[0];
         assert_eq!((m.width, m.height), (1920, 1080));
         assert_eq!(m.refresh_rate, Some(RefreshRate::integral(60)));
@@ -1432,7 +1434,12 @@ mod tests {
     #[test]
     fn test_vtb_ext_dtb_border_warning_reaches_caller() {
         let mut warnings = Vec::new();
-        let vtb = parse_vtb_ext(&vtb_ext_with_1080p_dtb(4), &mut |w| warnings.push(w)).unwrap();
+        let vtb = parse_vtb_ext(
+            &vtb_ext_with_1080p_dtb(4),
+            &DecodeOptions::new(),
+            &mut |w| warnings.push(w),
+        )
+        .unwrap();
         assert_eq!(vtb.timings[0].h_blank, Some(272));
         assert_eq!(
             warnings,
@@ -1448,7 +1455,7 @@ mod tests {
         // version=1, 0 DTBs, 0 CVTs, 1 ST
         // width=1280: (b1+31)*8=1280 → b1=129=0x81; b2=0x00 → 16:10 ratio, rate=60+0=60
         let data = [0x01u8, 0x00, 0x00, 0x01, 0x81, 0x00];
-        let vtb = parse_vtb_ext(&data, &mut |_| {}).unwrap();
+        let vtb = parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).unwrap();
         assert_eq!(vtb.timings.len(), 1);
         assert_eq!(vtb.timings[0].width, 1280);
         assert_eq!(vtb.timings[0].height, 800); // 1280 * 10 / 16 = 800
@@ -1462,7 +1469,7 @@ mod tests {
         //   b0 = 0x1B, b1 = (0x20) | aspect_16_9=(0x01<<2) = 0x24
         //   b2: 60Hz bit set = 0x08
         let data = [0x01u8, 0x00, 0x01, 0x00, 0x1B, 0x24, 0x08];
-        let vtb = parse_vtb_ext(&data, &mut |_| {}).unwrap();
+        let vtb = parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).unwrap();
         assert!(!vtb.timings.is_empty());
         let t = vtb
             .timings
@@ -1478,7 +1485,7 @@ mod tests {
     fn test_vtb_ext_insufficient_data_for_dtb_returns_none() {
         // version=1, 1 DTB, 0 CVTs, 0 STs — but only 4 bytes, no room for 18-byte DTB
         let data = [0x01u8, 0x01, 0x00, 0x00];
-        assert!(parse_vtb_ext(&data, &mut |_| {}).is_none());
+        assert!(parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).is_none());
     }
 
     // --- Vendor-Specific Video / Audio Data Block tests ---
