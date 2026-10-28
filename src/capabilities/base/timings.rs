@@ -224,15 +224,20 @@ pub(crate) fn build_dtd_mode(
 /// Decodes a single 18-byte Detailed Timing Descriptor slice into [`DisplayCapabilities`].
 ///
 /// Returns without modifying `caps` if the slot is a monitor descriptor (zero pixel clock)
-/// or contains invalid geometry. If the mode already exists in `caps.supported_modes` it is
-/// upgraded in place (preserving sync timing that may have been missing from an earlier source);
-/// otherwise it is appended.
+/// or contains invalid geometry. If a mode with the same width, height, refresh rate and
+/// scan type came from another kind of source (which lacks the DTD's timing detail), it is
+/// upgraded in place; if it came from an earlier DTD, that declaration is kept; otherwise
+/// the mode is appended.
+///
+/// The mode's source is `Dtd { block, index }`; without a `block` (the caller does not know
+/// where the descriptor sits) the mode has no source.
 ///
 /// This is `pub(crate)` so that the CEA-861 handler can reuse it for DTDs in extension blocks.
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub(crate) fn decode_dtd_slot(
     dtd: &[u8],
     caps: &mut DisplayCapabilities,
+    block: Option<u8>,
     dtd_index: u8,
     options: &DecodeOptions,
 ) {
@@ -244,7 +249,7 @@ pub(crate) fn decode_dtd_slot(
             return;
         }
         Ok(None) => return,
-        Ok(Some(m)) => m.with_source(ModeSource::DtdIndex(dtd_index)),
+        Ok(Some(m)) => with_dtd_source(m, block, dtd_index),
     };
 
     // Physical image area in mm: 12-bit H from byte 12 + upper nibble of byte 14,
@@ -257,14 +262,18 @@ pub(crate) fn decode_dtd_slot(
     }
 
     // If a mode with matching identity (w/h/rate/interlaced) was already added from a
-    // non-DTD source (which has zero sync fields), upgrade it in place. Otherwise append.
+    // non-DTD source (which has zero sync fields), upgrade it in place. An earlier DTD's
+    // declaration is kept, so an extension DTD repeating the preferred timing does not take
+    // over its entry. Otherwise append.
     if let Some(existing) = caps.supported_modes.iter_mut().find(|m| {
         m.width == mode.width
             && m.height == mode.height
             && m.refresh_rate == mode.refresh_rate
             && m.interlaced == mode.interlaced
     }) {
-        *existing = mode;
+        if !matches!(existing.source, Some(ModeSource::Dtd { .. })) {
+            *existing = mode;
+        }
     } else {
         caps.supported_modes.push(mode);
     }
@@ -281,6 +290,7 @@ pub(crate) fn decode_dtd_slot(
 pub(crate) fn decode_dtd_slot_into_sink(
     dtd: &[u8],
     sink: &mut dyn ModeSink,
+    block: Option<u8>,
     dtd_index: u8,
     options: &DecodeOptions,
 ) {
@@ -289,7 +299,15 @@ pub(crate) fn decode_dtd_slot_into_sink(
     }) {
         Err(w) => sink.push_warning(w),
         Ok(None) => {}
-        Ok(Some(mode)) => sink.push_mode(mode.with_source(ModeSource::DtdIndex(dtd_index))),
+        Ok(Some(mode)) => sink.push_mode(with_dtd_source(mode, block, dtd_index)),
+    }
+}
+
+/// Sets `mode`'s source to `Dtd { block, index }`, or leaves it unset without a `block`.
+fn with_dtd_source(mode: VideoMode, block: Option<u8>, index: u8) -> VideoMode {
+    match block {
+        Some(block) => mode.with_source(ModeSource::Dtd { block, index }),
+        None => mode,
     }
 }
 
@@ -305,7 +323,7 @@ pub(super) fn decode_detailed_timings(
 ) {
     for i in 0..4u8 {
         let offset = 0x36 + (i as usize * 18);
-        decode_dtd_slot_into_sink(&base[offset..offset + 18], sink, i, options);
+        decode_dtd_slot_into_sink(&base[offset..offset + 18], sink, Some(0), i, options);
     }
 }
 
@@ -724,7 +742,13 @@ mod tests {
         }
         let base = base_with_bordered_1080p(80, 2); // ambiguous, and 280 − 160 < 132
         let mut sink = Collect::default();
-        super::decode_dtd_slot_into_sink(&base[0x36..0x48], &mut sink, 0, &DecodeOptions::new());
+        super::decode_dtd_slot_into_sink(
+            &base[0x36..0x48],
+            &mut sink,
+            Some(0),
+            0,
+            &DecodeOptions::new(),
+        );
         assert_eq!(sink.1.len(), 1);
         assert_eq!(sink.1[0].h_blank, None);
         assert!(matches!(

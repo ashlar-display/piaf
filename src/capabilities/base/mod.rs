@@ -97,7 +97,7 @@ impl ExtensionHandler for BaseBlockHandler {
         // preferred_image_size_mm population and upgrade-in-place semantics.
         for i in 0..4u8 {
             let offset = 0x36 + (i as usize * 18);
-            timings::decode_dtd_slot(&base[offset..offset + 18], caps, i, options);
+            timings::decode_dtd_slot(&base[offset..offset + 18], caps, Some(0), i, options);
         }
     }
 }

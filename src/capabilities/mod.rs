@@ -329,7 +329,7 @@ fn blocks_with_tag<T: EdidSource>(edid: &T, tag: u8) -> (Vec<&[u8; 128]>, Vec<u8
 #[cfg(any(feature = "alloc", feature = "std"))]
 mod tests {
     use super::*;
-    use crate::model::capabilities::VideoMode;
+    use crate::model::capabilities::{ModeSource, VideoMode};
     use crate::model::extension::{ExtensionHandler, ExtensionTagRegistry};
     use crate::parser::parse_edid;
 
@@ -445,6 +445,44 @@ mod tests {
         assert_eq!(numbers, [(0, 1), (1, 1), (3, 1)]);
     }
 
+    /// The DTD sources, with each mode's width and horizontal border.
+    fn dtd_sources(caps: &DisplayCapabilities) -> Vec<(u16, u8, Option<ModeSource>)> {
+        caps.supported_modes
+            .iter()
+            .filter(|m| m.source.is_none() || matches!(m.source, Some(ModeSource::Dtd { .. })))
+            .map(|m| (m.width, m.h_border, m.source))
+            .collect()
+    }
+
+    #[test]
+    fn test_dtd_sources_name_their_block() {
+        let bytes = super::static_tests::edid_with_repeated_preferred_dtd();
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid(&parsed, &ExtensionLibrary::with_standard_handlers());
+
+        // The extension's repeat of the preferred timing leaves the base block's entry,
+        // with its borders and source, in place.
+        assert_eq!(
+            dtd_sources(&caps),
+            [
+                (1920, 2, Some(ModeSource::Dtd { block: 0, index: 0 })),
+                (2560, 2, Some(ModeSource::Dtd { block: 1, index: 1 })),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_dtd_without_block_number_has_no_source() {
+        use crate::capabilities::cea861::Cea861Handler;
+
+        let bytes = super::static_tests::edid_with_repeated_preferred_dtd();
+        let ext: &[u8; 128] = bytes[128..].try_into().unwrap();
+        let mut caps = DisplayCapabilities::default();
+        ExtensionHandler::process(&Cea861Handler, &[ext], &mut caps, &mut Vec::new());
+
+        assert_eq!(dtd_sources(&caps), [(1920, 0, None), (2560, 2, None)]);
+    }
+
     #[test]
     fn test_default_context_has_no_block_numbers() {
         let ctx = HandlerContext::default();
@@ -510,7 +548,7 @@ mod tests {
 #[cfg(test)]
 mod static_tests {
     use super::*;
-    use crate::model::capabilities::{StaticContext, VideoMode};
+    use crate::model::capabilities::{ModeSource, StaticContext, VideoMode};
     use crate::model::diagnostics::EdidWarning;
     use crate::model::extension::ExtensionTagRegistry;
     use crate::parser::parse_edid;
@@ -632,6 +670,45 @@ mod static_tests {
             block[127] = 0u8.wrapping_sub(sum);
         }
         bytes
+    }
+
+    /// A bordered 1920×1080 DTD in the base block, and a CTA-861 extension (block 1) whose
+    /// DTDs are the same timing without borders, then a bordered 2560×1440.
+    pub(super) fn edid_with_repeated_preferred_dtd() -> [u8; 256] {
+        let mut bytes = [0u8; 256];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        let preferred = bordered_dtd(14850, (1920, 280), (1080, 45), 88, 44);
+        bytes[0x36..0x48].copy_from_slice(&preferred);
+        bytes[126] = 1;
+        let ext = &mut bytes[128..];
+        ext[..4].copy_from_slice(&[0x02, 0x03, 4, 0]); // DTDs from byte 4
+        ext[4..22].copy_from_slice(&preferred);
+        ext[4 + 15] = 0; // no borders
+        ext[22..40].copy_from_slice(&bordered_dtd(24150, (2560, 160), (1440, 41), 48, 32));
+        for block in bytes.chunks_exact_mut(128) {
+            let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            block[127] = 0u8.wrapping_sub(sum);
+        }
+        bytes
+    }
+
+    #[test]
+    fn test_static_pipeline_dtd_sources_name_their_block() {
+        let bytes = edid_with_repeated_preferred_dtd();
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(
+            &parsed,
+            &[crate::capabilities::cea861::CEA861_HANDLER],
+        );
+
+        let dtds = caps
+            .iter_modes()
+            .filter(|m| matches!(m.source, Some(ModeSource::Dtd { .. })))
+            .map(|m| (m.width, m.h_border, m.source));
+        assert!(dtds.eq([
+            (1920, 2, Some(ModeSource::Dtd { block: 0, index: 0 })),
+            (2560, 2, Some(ModeSource::Dtd { block: 1, index: 1 })),
+        ]));
     }
 
     // VTB-EXT is decoded in alloc builds only.
