@@ -693,6 +693,18 @@ mod static_tests {
     }
 
     #[test]
+    fn test_static_pipeline_reports_the_preferred_image_size() {
+        let mut bytes = edid_with_repeated_preferred_dtd();
+        bytes[0x36 + 12..0x36 + 15].copy_from_slice(&[0x3F, 0x43, 0x21]); // 575 × 323 mm
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        assert_eq!(caps.preferred_image_size_mm, Some((575, 323)));
+    }
+
+    #[test]
     fn test_static_pipeline_dtd_sources_name_their_block() {
         let bytes = edid_with_repeated_preferred_dtd();
         let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();

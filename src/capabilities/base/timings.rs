@@ -75,7 +75,7 @@ pub(super) fn decode_standard_timings(base: &[u8; 128], sink: &mut dyn ModeSink)
 ///
 /// Returns:
 /// - `Ok(None)` — monitor descriptor (zero pixel clock) or undecodable geometry
-/// - `Ok(Some(mode))` — valid timing; does **not** populate `preferred_image_size_mm`
+/// - `Ok(Some(mode))` — valid timing
 /// - `Err(w)` — [`EdidWarning::DtdSlotTooShort`] or [`EdidWarning::DtdPixelClockOverflow`]
 pub(crate) fn build_dtd_mode(
     dtd: &[u8],
@@ -252,15 +252,6 @@ pub(crate) fn decode_dtd_slot(
         Ok(Some(m)) => with_dtd_source(m, block, dtd_index),
     };
 
-    // Physical image area in mm: 12-bit H from byte 12 + upper nibble of byte 14,
-    // 12-bit V from byte 13 + lower nibble of byte 14. Both zero = undefined.
-    // `build_dtd_mode` guarantees dtd.len() >= 18.
-    let h_mm = (((dtd[14] as u16) & 0xF0) << 4) | (dtd[12] as u16);
-    let v_mm = (((dtd[14] as u16) & 0x0F) << 8) | (dtd[13] as u16);
-    if h_mm != 0 && v_mm != 0 && caps.preferred_image_size_mm.is_none() {
-        caps.preferred_image_size_mm = Some((h_mm, v_mm));
-    }
-
     // If a mode with matching identity (w/h/rate/interlaced) was already added from a
     // non-DTD source (which has zero sync fields), upgrade it in place. An earlier DTD's
     // declaration is kept, so an extension DTD repeating the preferred timing does not take
@@ -282,8 +273,7 @@ pub(crate) fn decode_dtd_slot(
 /// Decodes a single 18-byte Detailed Timing Descriptor slice into a [`ModeSink`].
 ///
 /// Like [`decode_dtd_slot`] but writes into any [`ModeSink`] rather than directly into
-/// [`DisplayCapabilities`]. The `preferred_image_size_mm` field is not populated — that
-/// is a base-block concern handled by [`decode_dtd_slot`].
+/// [`DisplayCapabilities`].
 ///
 /// This is `pub(crate)` so that the CEA-861 handler can use it for DTDs in extension blocks
 /// in no-alloc builds.
@@ -311,10 +301,27 @@ fn with_dtd_source(mode: VideoMode, block: Option<u8>, index: u8) -> VideoMode {
     }
 }
 
+/// The image size of the preferred timing, in mm: the size in the base block's first
+/// Detailed Timing Descriptor (slot `0x36`), which EDID defines as the preferred timing.
+///
+/// `None` when the slot holds a display descriptor (zero pixel clock) rather than a timing,
+/// or when either axis is 0 (undefined).
+pub(super) fn preferred_image_size_mm(base: &[u8; 128]) -> Option<(u16, u16)> {
+    let dtd = &base[0x36..0x48];
+    if dtd[0] == 0 && dtd[1] == 0 {
+        return None;
+    }
+    // 12-bit H from byte 12 + upper nibble of byte 14, 12-bit V from byte 13 + lower
+    // nibble of byte 14.
+    let h_mm = (((dtd[14] as u16) & 0xF0) << 4) | (dtd[12] as u16);
+    let v_mm = (((dtd[14] as u16) & 0x0F) << 8) | (dtd[13] as u16);
+    (h_mm != 0 && v_mm != 0).then_some((h_mm, v_mm))
+}
+
 /// Decodes the four detailed timing descriptor (DTD) slots (offsets 0x36, 0x48, 0x5A, 0x6C).
 /// Slots with a zero pixel clock are monitor descriptors and are skipped here.
 // Called by capabilities_from_edid_static (step 6). The alloc BaseBlockHandler uses
-// decode_dtd_slot directly to preserve preferred_image_size_mm and upgrade-in-place semantics.
+// decode_dtd_slot directly to preserve upgrade-in-place semantics.
 #[allow(dead_code)]
 pub(super) fn decode_detailed_timings(
     base: &[u8; 128],
@@ -642,6 +649,34 @@ mod tests {
         let mut caps = DisplayCapabilities::default();
         BaseBlockHandler.process(&[base], &mut caps, &mut Vec::new());
         caps
+    }
+
+    /// `base_with_bordered_1080p(0, 0)` with the same timing in slot 1, sized 600 × 340 mm.
+    fn base_with_sized_second_dtd() -> [u8; 128] {
+        let mut base = base_with_bordered_1080p(0, 0);
+        base.copy_within(0x36..0x48, 0x48);
+        base[0x48 + 12..0x48 + 15].copy_from_slice(&[0x58, 0x54, 0x21]);
+        base
+    }
+
+    #[test]
+    fn test_image_size_comes_from_the_preferred_timing_only() {
+        // Slot 0 gives no size: another slot's size does not stand in for it.
+        let mut base = base_with_sized_second_dtd();
+        assert_eq!(decode_base(&base).preferred_image_size_mm, None);
+
+        base[0x36 + 12..0x36 + 15].copy_from_slice(&[0x0F, 0x28, 0x21]); // 527 × 296 mm
+        assert_eq!(decode_base(&base).preferred_image_size_mm, Some((527, 296)));
+    }
+
+    #[test]
+    fn test_image_size_none_when_first_slot_is_a_display_descriptor() {
+        let mut base = base_with_sized_second_dtd();
+        // A display product name descriptor, whose text falls where a DTD's size would be.
+        base[0x36..0x48].fill(0);
+        base[0x39] = 0xFC;
+        base[0x3B..0x48].copy_from_slice(b"Pinball DMD\n ");
+        assert_eq!(decode_base(&base).preferred_image_size_mm, None);
     }
 
     fn borders_warnings(caps: &DisplayCapabilities) -> Vec<EdidWarning> {
