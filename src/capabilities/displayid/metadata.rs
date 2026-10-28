@@ -41,10 +41,11 @@ use display_types::DisplayIdCapabilities;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use display_types::displayid::{
     Chromaticity12, ChromaticityPoint12, ColorDepthsFull, ColorDepthsSubsampled,
-    CustomColorSpaceEotfCombo, DisplayIdStereoInterfaceV2, DisplayIdVendorSpecific,
-    DisplayInterfaceFeatures, DisplayParamsV2, DisplayTechnology as V2DisplayTechnology,
-    DualInterfaceMirroring, DynamicTimingRange, ScanOrientation, StereoEye, StereoTimingCode,
-    StereoTimingCodeType, StereoTimingScopeV2, StereoViewingMethodV2,
+    CustomColorSpaceEotfCombo, DisplayIdImageSize, DisplayIdStereoInterfaceV2,
+    DisplayIdVendorSpecific, DisplayInterfaceFeatures, DisplayParamsV2,
+    DisplayTechnology as V2DisplayTechnology, DualInterfaceMirroring, DynamicTimingRange,
+    ImageSizeUnit, ScanOrientation, StereoEye, StereoTimingCode, StereoTimingCodeType,
+    StereoTimingScopeV2, StereoViewingMethodV2,
 };
 
 /// Decodes a Product Identification Block payload into `caps`.
@@ -275,14 +276,13 @@ const fn decode_v2_color_bit_depth(field: u8) -> Option<(u8, ColorBitDepth)> {
 /// - Byte  28:    Gamma EOTF, stored as `(γ − 1) × 100`; `0xFF` = unspecified
 ///
 /// Image size precision is signalled by bit 7 of the data-block revision byte:
-/// `0` = 0.1 mm units (default), `1` = 1 mm units. Sizes are normalised to whole
-/// millimetres before being written to `caps.preferred_image_size_mm`.
+/// `0` = 0.1 mm units (default), `1` = 1 mm units. The size is stored as declared, with
+/// its unit, in `did.image_size`.
 ///
 /// Chromaticity, luminance, gamma, color depth, display technology, scan orientation,
 /// audio routing, and the CIE-coordinate variant are stored on
-/// `did.display_params_v2`. Native pixel count and image size are mirrored onto
-/// `caps.native_pixels` and `caps.preferred_image_size_mm` respectively, alongside
-/// `caps.color_bit_depth` (when defined). Short payloads are silently ignored.
+/// `did.display_params_v2`. Native pixel count is mirrored onto `caps.native_pixels`,
+/// alongside `caps.color_bit_depth` (when defined). Short payloads are silently ignored.
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub(super) fn decode_v2_display_params_block(
     payload: &[u8],
@@ -302,13 +302,12 @@ pub(super) fn decode_v2_display_params_block(
     let h_size = u16::from_le_bytes([payload[0], payload[1]]);
     let v_size = u16::from_le_bytes([payload[2], payload[3]]);
     if h_size != 0 && v_size != 0 {
-        let mm = if size_in_whole_mm {
-            (h_size, v_size)
+        let unit = if size_in_whole_mm {
+            ImageSizeUnit::Millimetre
         } else {
-            // 0.1 mm units — convert to whole mm to match the field's documented unit.
-            (h_size / 10, v_size / 10)
+            ImageSizeUnit::TenthMillimetre
         };
-        caps.preferred_image_size_mm = Some(mm);
+        did.image_size = Some(DisplayIdImageSize::new(h_size, v_size, unit));
     }
 
     let h_px = u16::from_le_bytes([payload[4], payload[5]]);
@@ -713,7 +712,8 @@ pub(super) fn decode_v2_cta_displayid_block(
     caps.set_extension_data(0x02, cea_caps);
 }
 
-/// Decodes a Display Parameters Block payload into `caps`.
+/// Decodes a Display Parameters Block payload into `caps`, and its image size into
+/// `did.image_size`.
 ///
 /// Payload layout (DisplayID 1.x §4.3, fixed 12 bytes):
 /// - Bytes  0–1: Horizontal image size in tenths of mm (little-endian uint16; `0` = not defined)
@@ -728,13 +728,21 @@ pub(super) fn decode_v2_cta_displayid_block(
 /// Image size and native pixel count are written only when both axes are non-zero.
 /// Aspect ratio and color bit depth are written when the payload is long enough.
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub(super) fn decode_display_params_block(payload: &[u8], caps: &mut DisplayCapabilities) {
-    // Image size in tenths of mm (bytes 0–3).
+pub(super) fn decode_display_params_block(
+    payload: &[u8],
+    caps: &mut DisplayCapabilities,
+    did: &mut DisplayIdCapabilities,
+) {
+    // Image size in tenths of mm (bytes 0–3), as edid-decode and libdisplay-info read it.
     if payload.len() >= 4 {
         let h = u16::from_le_bytes([payload[0], payload[1]]);
         let v = u16::from_le_bytes([payload[2], payload[3]]);
         if h != 0 && v != 0 {
-            caps.preferred_image_size_mm = Some((h, v));
+            did.image_size = Some(DisplayIdImageSize::new(
+                h,
+                v,
+                ImageSizeUnit::TenthMillimetre,
+            ));
         }
     }
 
@@ -770,15 +778,19 @@ pub(super) fn decode_display_params_block(payload: &[u8], caps: &mut DisplayCapa
 }
 
 /// Scans all data blocks in `payload` for a Display Parameters Block (tag `0x01`)
-/// and decodes the first one found into `caps`.
+/// and decodes the first one found into `caps` and `did`.
 #[cfg(any(feature = "alloc", feature = "std"))]
 #[cfg(test)]
-pub(super) fn scan_display_params_block(payload: &[u8], caps: &mut DisplayCapabilities) {
+pub(super) fn scan_display_params_block(
+    payload: &[u8],
+    caps: &mut DisplayCapabilities,
+    did: &mut DisplayIdCapabilities,
+) {
     let mut found = false;
     for_each_data_block(payload, |tag, _revision, block_payload| {
         if tag == TAG_DISPLAY_PARAMS && !found {
             found = true;
-            decode_display_params_block(block_payload, caps);
+            decode_display_params_block(block_payload, caps, did);
         }
     });
 }
@@ -1481,7 +1493,7 @@ pub(super) fn scan_all_metadata_blocks(
         }
         TAG_DISPLAY_PARAMS if !found_display_params => {
             found_display_params = true;
-            decode_display_params_block(block_payload, caps);
+            decode_display_params_block(block_payload, caps, did);
         }
         TAG_COLOR_CHARACTERISTICS if !found_color_characteristics => {
             found_color_characteristics = true;
@@ -1955,7 +1967,10 @@ mod tests {
         let mut caps = DisplayCapabilities::default();
         let mut did = DisplayIdCapabilities::new(0x20, 0);
         decode_v2_display_params_block(&p, 0x00, &mut caps, &mut did);
-        assert_eq!(caps.preferred_image_size_mm, Some((597, 336)));
+        let size = DisplayIdImageSize::new(5970, 3360, ImageSizeUnit::TenthMillimetre);
+        assert_eq!(did.image_size, Some(size));
+        // DisplayID's size stays out of the base block's preferred-timing field.
+        assert_eq!(caps.preferred_image_size_mm, None);
     }
 
     #[test]
@@ -1977,7 +1992,8 @@ mod tests {
         let mut caps = DisplayCapabilities::default();
         let mut did = DisplayIdCapabilities::new(0x20, 0);
         decode_v2_display_params_block(&p, 0x80, &mut caps, &mut did);
-        assert_eq!(caps.preferred_image_size_mm, Some((597, 336)));
+        let size = DisplayIdImageSize::new(597, 336, ImageSizeUnit::Millimetre);
+        assert_eq!(did.image_size, Some(size));
     }
 
     #[test]
@@ -1998,7 +2014,7 @@ mod tests {
         let mut caps = DisplayCapabilities::default();
         let mut did = DisplayIdCapabilities::new(0x20, 0);
         decode_v2_display_params_block(&p, 0x80, &mut caps, &mut did);
-        assert_eq!(caps.preferred_image_size_mm, None);
+        assert_eq!(did.image_size, None);
     }
 
     #[test]
@@ -2331,7 +2347,8 @@ mod tests {
             &DecodeOptions::new(),
         );
         assert!(did_v2.display_params_v2.is_some());
-        assert_eq!(caps_v2.preferred_image_size_mm, Some((597, 336)));
+        let size = DisplayIdImageSize::new(597, 336, ImageSizeUnit::Millimetre);
+        assert_eq!(did_v2.image_size, Some(size));
         assert_eq!(caps_v2.native_pixels, Some((3840, 2160)));
     }
 
@@ -2656,78 +2673,91 @@ mod tests {
 
     #[test]
     fn test_display_params_image_size() {
-        // 597 and 336 are stored in tenths of mm (59.7 mm × 33.6 mm).
-        let payload = make_display_params_payload(597, 336, 0, 0, 0, 0x00);
+        // A 27" 16:9 panel, 597 × 336 mm, stored in tenths of mm as edid-decode and
+        // libdisplay-info read them.
+        let payload = make_display_params_payload(5970, 3360, 0, 0, 0, 0x00);
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
-        assert_eq!(caps.preferred_image_size_mm, Some((597, 336)));
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
+        let size = DisplayIdImageSize::new(5970, 3360, ImageSizeUnit::TenthMillimetre);
+        assert_eq!(did.image_size, Some(size));
+        assert_eq!(size.tenths_mm(), (5970, 3360));
+        assert_eq!(caps.preferred_image_size_mm, None);
     }
 
     #[test]
     fn test_display_params_zero_size_not_stored() {
         let payload = make_display_params_payload(0, 0, 0, 0, 0, 0x00);
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
-        assert_eq!(caps.preferred_image_size_mm, None);
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
+        assert_eq!(did.image_size, None);
     }
 
     #[test]
     fn test_display_params_partial_zero_size_not_stored() {
-        let payload = make_display_params_payload(597, 0, 0, 0, 0, 0x00);
+        let payload = make_display_params_payload(5970, 0, 0, 0, 0, 0x00);
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
-        assert_eq!(caps.preferred_image_size_mm, None);
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
+        assert_eq!(did.image_size, None);
     }
 
     #[test]
     fn test_display_params_native_pixels() {
-        let payload = make_display_params_payload(597, 336, 1920, 1080, 0, 0x00);
+        let payload = make_display_params_payload(5970, 3360, 1920, 1080, 0, 0x00);
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
         assert_eq!(caps.native_pixels, Some((1920, 1080)));
     }
 
     #[test]
     fn test_display_params_zero_native_pixels_not_stored() {
-        let payload = make_display_params_payload(597, 336, 0, 0, 0, 0x00);
+        let payload = make_display_params_payload(5970, 3360, 0, 0, 0, 0x00);
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
         assert_eq!(caps.native_pixels, None);
     }
 
     #[test]
     fn test_display_params_aspect_ratio() {
         // 16:9 → (16/9 − 1) × 100 ≈ 78
-        let payload = make_display_params_payload(597, 336, 0, 0, 78, 0x00);
+        let payload = make_display_params_payload(5970, 3360, 0, 0, 78, 0x00);
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
         assert_eq!(caps.panel_aspect_ratio_100, Some(78));
     }
 
     #[test]
     fn test_display_params_color_bit_depth_8bpc() {
         // Low nibble = bpc − 1: 8bpc → 7 → byte = 0x07
-        let payload = make_display_params_payload(597, 336, 0, 0, 0, 0x07);
+        let payload = make_display_params_payload(5970, 3360, 0, 0, 0, 0x07);
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
         assert_eq!(caps.color_bit_depth, Some(ColorBitDepth::Depth8));
     }
 
     #[test]
     fn test_display_params_color_bit_depth_10bpc() {
         // 10bpc → 9 → byte = 0x09
-        let payload = make_display_params_payload(597, 336, 0, 0, 0, 0x09);
+        let payload = make_display_params_payload(5970, 3360, 0, 0, 0, 0x09);
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
         assert_eq!(caps.color_bit_depth, Some(ColorBitDepth::Depth10));
     }
 
     #[test]
     fn test_display_params_undefined_bit_depth_not_stored() {
         // Low nibble = 0 → bpc = 1 → not a valid even bit depth → None
-        let payload = make_display_params_payload(597, 336, 0, 0, 0, 0x00);
+        let payload = make_display_params_payload(5970, 3360, 0, 0, 0, 0x00);
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
         assert_eq!(caps.color_bit_depth, None);
     }
 
@@ -2736,8 +2766,9 @@ mod tests {
         // Only 3 bytes — too short for image size.
         let payload = [0x55u8, 0x01, 0x00];
         let mut caps = DisplayCapabilities::default();
-        decode_display_params_block(&payload, &mut caps);
-        assert_eq!(caps.preferred_image_size_mm, None);
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        decode_display_params_block(&payload, &mut caps, &mut did);
+        assert_eq!(did.image_size, None);
     }
 
     // -----------------------------------------------------------------------
@@ -4318,12 +4349,14 @@ mod tests {
 
     #[test]
     fn test_scan_display_params_first_wins() {
-        let first = make_block(0x01, &make_display_params_payload(600, 400, 0, 0, 0, 0));
-        let second = make_block(0x01, &make_display_params_payload(300, 200, 0, 0, 0, 0));
+        let first = make_block(0x01, &make_display_params_payload(6000, 4000, 0, 0, 0, 0));
+        let second = make_block(0x01, &make_display_params_payload(3000, 2000, 0, 0, 0, 0));
         let payload = [first, second].concat();
         let mut caps = DisplayCapabilities::default();
-        scan_display_params_block(&payload, &mut caps);
-        assert_eq!(caps.preferred_image_size_mm, Some((600, 400)));
+        let mut did = DisplayIdCapabilities::new(0x12, 0);
+        scan_display_params_block(&payload, &mut caps, &mut did);
+        let size = DisplayIdImageSize::new(6000, 4000, ImageSizeUnit::TenthMillimetre);
+        assert_eq!(did.image_size, Some(size));
     }
 
     #[test]

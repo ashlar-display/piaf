@@ -76,8 +76,6 @@ pub use parser::parse_edid_owned;
 pub mod capabilities;
 pub use capabilities::Cea861Flags;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use capabilities::DisplayIdCapabilities;
-#[cfg(any(feature = "alloc", feature = "std"))]
 pub use capabilities::{
     Audio3dChannels, Audio3dSpeakerAllocation, AudioFormat, AudioFormatInfo, AudioSampleRates,
     Cea861Capabilities, ColorimetryBlock, ColorimetryFlags, DtcPointEncoding, HdmiAudioBlock,
@@ -91,5 +89,7 @@ pub use capabilities::{
 pub use capabilities::{
     CEA861_HANDLER, Cea861Handler, DISPLAYID_HANDLER, DisplayIdHandler, STANDARD_HANDLERS,
 };
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use capabilities::{DisplayIdCapabilities, DisplayIdImageSize, ImageSizeUnit};
 pub use capabilities::{capabilities_from_edid, capabilities_from_edid_with_options};
 pub use capabilities::{capabilities_from_edid_static, capabilities_from_edid_static_with_options};

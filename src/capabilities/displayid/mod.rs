@@ -19,7 +19,7 @@ pub(crate) use timing::decode_type_vii_descriptor_to_mode;
 use timing::process_data_blocks;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use display_types::DisplayIdCapabilities;
+pub use display_types::{DisplayIdCapabilities, DisplayIdImageSize, ImageSizeUnit};
 
 /// Processes DisplayID extension blocks (tag `0x70`).
 ///

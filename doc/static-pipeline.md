@@ -204,8 +204,8 @@ speaker allocation — those require the alloc pipeline and are available throug
 On Cortex-M0 targets with small stacks, place the result in a `static mut` if stack pressure is
 a concern.
 
-**`preferred_image_size_mm`.** Populated correctly from the base block. Not populated from CEA
-DTDs — that field is a base-block concern and does not belong to the extension pipeline.
+**`preferred_image_size_mm`.** The image size of the preferred timing (the base block's first
+DTD), populated in every build. Other DTDs, CEA or base, do not set it.
 
 **Multi-block formats in bare `no_std`.** In `alloc`/`std` builds, the dispatch layer collects
 all fragments for a given tag and calls the handler once with the full slice. In bare `no_std`
