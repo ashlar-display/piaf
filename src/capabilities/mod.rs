@@ -17,9 +17,9 @@ pub use cea861::{
     VesaTransferCharacteristic, VideoCapability, VideoCapabilityFlags, VtbExtBlock, infoframe_type,
 };
 pub use cea861::{CEA861_HANDLER, Cea861Handler};
-#[cfg(any(feature = "alloc", feature = "std"))]
-pub use displayid::DisplayIdCapabilities;
 pub use displayid::{DISPLAYID_HANDLER, DisplayIdHandler};
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use displayid::{DisplayIdCapabilities, DisplayIdImageSize, ImageSizeUnit};
 
 /// Pre-built static handler slice containing the standard built-in handlers
 /// (CEA-861 and DisplayID).
