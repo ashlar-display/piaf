@@ -41,8 +41,6 @@ pub mod model;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use model::ExtensionData;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use model::ExtensionHandler;
-#[cfg(any(feature = "alloc", feature = "std"))]
 pub use model::ParseWarning;
 pub use model::{
     AnalogColorType, AnalogSyncLevel, BacklightType, Chromaticity, ChromaticityPoint,
@@ -63,6 +61,8 @@ pub use model::{
 };
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use model::{DisplayIdTransferCharacteristic, TransferCurve};
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use model::{ExtensionHandler, HandlerContext};
 
 /// EDID byte-level parser.
 pub mod parser;
@@ -75,8 +75,6 @@ pub use parser::parse_edid_owned;
 /// Capability extraction from a parsed EDID ([`EdidSource`]).
 pub mod capabilities;
 pub use capabilities::Cea861Flags;
-#[cfg(any(feature = "alloc", feature = "std"))]
-pub use capabilities::DisplayIdCapabilities;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use capabilities::{
     Audio3dChannels, Audio3dSpeakerAllocation, AudioFormat, AudioFormatInfo, AudioSampleRates,
@@ -91,5 +89,7 @@ pub use capabilities::{
 pub use capabilities::{
     CEA861_HANDLER, Cea861Handler, DISPLAYID_HANDLER, DisplayIdHandler, STANDARD_HANDLERS,
 };
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use capabilities::{DisplayIdCapabilities, DisplayIdImageSize, ImageSizeUnit};
 pub use capabilities::{capabilities_from_edid, capabilities_from_edid_with_options};
 pub use capabilities::{capabilities_from_edid_static, capabilities_from_edid_static_with_options};
