@@ -42,9 +42,10 @@ impl ExtensionHandler for MyHandler {
 }
 ```
 
-The pipeline calls each handler through `process_with_options`, which also receives the
-caller's `DecodeOptions` (see [Decode options](#decode-options)). Its default implementation
-ignores them and calls `process`.
+The pipeline calls each handler through `process_in_context`, which also receives a
+`HandlerContext` with the caller's `DecodeOptions` and each block's EDID block number (see
+[Decode options](#decode-options)). Its default implementation ignores the context and calls
+`process`.
 
 ### `StaticExtensionHandler` (static, all tiers)
 
@@ -153,27 +154,33 @@ reach every handler, so one setting covers the whole EDID. A handler that decode
 options apply to (such as Detailed Timing Descriptors, for `dtd_border_policy`) should apply
 them too:
 
-- a dynamic handler overrides `process_with_options` and has `process` call it with
-  `DecodeOptions::new()`;
+- a dynamic handler overrides `process_in_context`, reads them from
+  `HandlerContext::options()`, and has `process` call it with `HandlerContext::default()`;
 - a static handler reads them from `StaticContext::options()`.
 
 ```rust
 impl ExtensionHandler for MyHandler {
     fn process(&self, blocks: &[&[u8; 128]], caps: &mut DisplayCapabilities, warnings: &mut Vec<ParseWarning>) {
-        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
+        self.process_in_context(blocks, caps, warnings, &HandlerContext::default());
     }
 
-    fn process_with_options(
+    fn process_in_context(
         &self,
         blocks: &[&[u8; 128]],
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
-        options: &DecodeOptions,
+        ctx: &HandlerContext<'_>,
     ) {
-        // Decode, applying `options`.
+        // Decode, applying `ctx.options()`.
     }
 }
 ```
+
+Both contexts also give each block's EDID block number: `block_number(i)` is the number of
+`blocks[i]` (0 for the base block, `n` for the `n`th block after it). The built-in CTA-861
+handler names it in its DTDs' `ModeSource::Dtd { block, index }`. It is `None` when the
+handler is called without the numbers, as through `HandlerContext::default()`; a handler
+then leaves what depends on them unset rather than guess.
 
 ## `no_std` support
 

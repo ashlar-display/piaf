@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `parse_warnings_dropped() -> u16`, both defaulted, so existing implementations still
     compile. The default `propagate_parse_warnings` now copies `parse_warnings()`; it was a
     no-op.
+- **DTD sources name their EDID block** (display-types 0.5). `ModeSource::DtdIndex(n)`,
+  the index within the descriptor's block, is replaced by `ModeSource::Dtd { block, index }`,
+  `block` being the EDID block number (0 for the base block). A CTA-861 extension's first
+  DTD was `DtdIndex(0)` like the base block's; the preferred timing is now
+  `Dtd { block: 0, index: 0 }`, so replace a match on `DtdIndex(0)` with that. A
+  `Cea861Handler::process` called directly is not told its block's number, so its DTDs
+  have no source; the pipelines always tell it.
 
 ### Added
 
@@ -66,9 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the caller settle readings the data leaves ambiguous, for the whole EDID:
   `capabilities_from_edid_with_options` and `capabilities_from_edid_static_with_options`
   take them, and the functions without the suffix use the defaults. Handlers receive them
-  through the new `ExtensionHandler::process_with_options` (provided: it calls `process`,
-  so existing handlers are unaffected) and `StaticContext::options()` (set with
-  `StaticContext::with_options`).
+  through the new `ExtensionHandler::process_in_context` (provided: it calls `process`,
+  so existing handlers are unaffected), in a `HandlerContext`, and
+  `StaticContext::options()` (set with `StaticContext::with_options`).
   - The first option is `dtd_border_policy` (`DtdBorderPolicy`): `Unsettled`, the default,
     reads EDID 1.3 and warns as above; `Fixed(DtdBorderReading::Edid13 | Edid14)` applies
     that reading to every Detailed Timing Descriptor (base block, CTA-861 extensions,
@@ -78,6 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     so the refresh rate is lower, and `h_blank` is the blanking. `DtdBorderReading` is
     re-exported. The declared EDID version is not evidence of the reading; its
     documentation shows how to follow it anyway.
+- **Block numbers for handlers.** `HandlerContext::block_number(i)` and
+  `StaticContext::block_number(i)` give the EDID block number of each block a handler
+  receives (0 for the base block, `n` for the `n`th block after it); both pipelines set
+  them. `HandlerContext` (`alloc`/`std`) also carries the options, has a public
+  constructor and `Default` (default options, no block numbers), and keeps its fields
+  private so it can grow without changing `ExtensionHandler`. `StaticContext` gains
+  `with_block_numbers`.
 
 ### Changed
 
@@ -98,6 +112,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A DTD repeating an earlier DTD's timing replaced its entry** in
+  `DisplayCapabilities::supported_modes`, so a CTA-861 extension DTD with the preferred
+  timing's resolution, refresh rate and scan type took over the base block's entry (its
+  timing detail and source). The first DTD declaration is now kept. A DTD still replaces a
+  mode from an established, standard or VIC source, which lacks its timing detail. The
+  static pipeline already kept the first.
 - **piaf did not build for bare-metal targets** (e.g. `thumbv7em-none-eabi`), with or
   without `alloc`. Its `std` and `alloc` features did not reach its dependencies, so
   display-types and thiserror were always built with `std`, and the `no_std` build only
