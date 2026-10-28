@@ -48,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Dtd { block: 0, index: 0 }`, so replace a match on `DtdIndex(0)` with that. A
   `Cea861Handler::process` called directly is not told its block's number, so its DTDs
   have no source; the pipelines always tell it.
+- **`preferred_image_size_mm` is the preferred timing's image size** (display-types 0.5):
+  the size in the base block's first Detailed Timing Descriptor, `None` when that
+  descriptor gives none. It was the first non-zero size among all DTDs, a CTA-861
+  extension's included, and a DisplayID Display Parameters block replaced it. DisplayID's
+  image size now has its own field (below). For an EDID whose first DTD carries its size,
+  as is usual, the value does not change.
 
 ### Added
 
@@ -85,6 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     so the refresh rate is lower, and `h_blank` is the blanking. `DtdBorderReading` is
     re-exported. The declared EDID version is not evidence of the reading; its
     documentation shows how to follow it anyway.
+- **DisplayID's image size in `DisplayIdCapabilities::image_size`** (display-types 0.5),
+  from the Display Parameters block (1.x `0x01`, 2.x `0x21`), as a `DisplayIdImageSize`
+  in the unit the block declares, so 2.x sizes in 0.1 mm keep their precision (they were
+  truncated to whole millimetres). `DisplayIdImageSize` and `ImageSizeUnit` are
+  re-exported.
 - **Block numbers for handlers.** `HandlerContext::block_number(i)` and
   `StaticContext::block_number(i)` give the EDID block number of each block a handler
   receives (0 for the base block, `n` for the `n`th block after it); both pipelines set
@@ -112,6 +123,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **DisplayID 1.x image sizes were ten times too large.** Block `0x01` gives the size in
+  0.1 mm, as edid-decode and libdisplay-info read it; piaf took it as millimetres.
+  `doc/displayid-block-tags.md` also showed a 6-byte layout for the block; it is 12 bytes,
+  as decoded.
+- **`preferred_image_size_mm` was never set in bare `no_std` builds**, by either pipeline.
 - **A DTD repeating an earlier DTD's timing replaced its entry** in
   `DisplayCapabilities::supported_modes`, so a CTA-861 extension DTD with the preferred
   timing's resolution, refresh rate and scan type took over the base block's entry (its
