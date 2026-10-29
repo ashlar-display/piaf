@@ -8,7 +8,7 @@ pub use prelude::{Box, String, Vec};
 /// Extension handler traits and registries.
 pub mod extension;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use extension::ExtensionHandler;
+pub use extension::{ExtensionHandler, HandlerContext};
 pub use extension::{
     ExtensionLibrary, ExtensionMetadata, ExtensionTagRegistry, KnownExtensions,
     StaticExtensionHandler,

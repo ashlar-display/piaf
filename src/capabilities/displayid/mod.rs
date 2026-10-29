@@ -7,11 +7,9 @@ use crate::model::capabilities::StaticContext;
 use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
-#[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::extension::ExtensionHandler;
 use crate::model::extension::StaticExtensionHandler;
 #[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::options::DecodeOptions;
+use crate::model::extension::{ExtensionHandler, HandlerContext};
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Arc, Vec};
 
@@ -21,7 +19,7 @@ pub(crate) use timing::decode_type_vii_descriptor_to_mode;
 use timing::process_data_blocks;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use display_types::DisplayIdCapabilities;
+pub use display_types::{DisplayIdCapabilities, DisplayIdImageSize, ImageSizeUnit};
 
 /// Processes DisplayID extension blocks (tag `0x70`).
 ///
@@ -168,16 +166,17 @@ impl ExtensionHandler for DisplayIdHandler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
-        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
+        self.process_in_context(blocks, caps, warnings, &HandlerContext::default());
     }
 
-    fn process_with_options(
+    fn process_in_context(
         &self,
         blocks: &[&[u8; 128]],
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
-        options: &DecodeOptions,
+        ctx: &HandlerContext<'_>,
     ) {
+        let options = ctx.options();
         let Some(first) = blocks.first() else { return };
 
         let (version, _section_byte_count, product_type, extension_count) =
@@ -594,12 +593,12 @@ mod tests {
             .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
         let mut caps = DisplayCapabilities::default();
         let mut warnings: Vec<ParseWarning> = Vec::new();
-        ExtensionHandler::process_with_options(
+        ExtensionHandler::process_in_context(
             &DisplayIdHandler,
             &[&block],
             &mut caps,
             &mut warnings,
-            &options,
+            &HandlerContext::new(options, &[1]),
         );
 
         // The block is decoded for its modes and for its CTA metadata; both read 1.4, so

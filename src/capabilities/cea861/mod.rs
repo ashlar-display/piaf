@@ -37,9 +37,9 @@ use crate::model::capabilities::VideoMode;
 use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
-#[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::extension::ExtensionHandler;
 use crate::model::extension::StaticExtensionHandler;
+#[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::extension::{ExtensionHandler, HandlerContext};
 use crate::model::options::DecodeOptions;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Arc, Vec};
@@ -75,16 +75,17 @@ impl ExtensionHandler for Cea861Handler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
-        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
+        self.process_in_context(blocks, caps, warnings, &HandlerContext::default());
     }
 
-    fn process_with_options(
+    fn process_in_context(
         &self,
         blocks: &[&[u8; 128]],
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
-        options: &DecodeOptions,
+        ctx: &HandlerContext<'_>,
     ) {
+        let options = ctx.options();
         let Some(first) = blocks.first() else { return };
         let flags = Cea861Flags::from_bits_truncate(first[3]);
 
@@ -96,7 +97,8 @@ impl ExtensionHandler for Cea861Handler {
             .unwrap_or_else(|| Cea861Capabilities::new(flags));
         cea_caps.flags |= flags;
 
-        for ext in blocks {
+        for (i, ext) in blocks.iter().enumerate() {
+            let block = ctx.block_number(i);
             // Parse the data block collection: bytes 4 through dtd_offset-1.
             // When dtd_offset == 0 the spec says no DTDs are present, so data blocks
             // may fill the rest of the block (bytes 4–127).
@@ -123,7 +125,7 @@ impl ExtensionHandler for Cea861Handler {
                 let mut offset = dtd_offset;
                 let mut dtd_index: u8 = 0;
                 while offset + 18 <= 127 {
-                    decode_dtd_slot(&ext[offset..offset + 18], caps, dtd_index, options);
+                    decode_dtd_slot(&ext[offset..offset + 18], caps, block, dtd_index, options);
                     offset += 18;
                     dtd_index = dtd_index.saturating_add(1);
                 }
@@ -498,6 +500,7 @@ pub(crate) fn cea861_collection_into_sink(
 pub(crate) fn cea861_process_into_sink(
     ext: &[u8; 128],
     sink: &mut dyn ModeSink,
+    block: Option<u8>,
     options: &DecodeOptions,
 ) {
     let dtd_offset = ext[2] as usize;
@@ -516,7 +519,7 @@ pub(crate) fn cea861_process_into_sink(
         let mut offset = dtd_offset;
         let mut dtd_index: u8 = 0;
         while offset + 18 <= 127 {
-            decode_dtd_slot_into_sink(&ext[offset..offset + 18], sink, dtd_index, options);
+            decode_dtd_slot_into_sink(&ext[offset..offset + 18], sink, block, dtd_index, options);
             offset += 18;
             dtd_index = dtd_index.saturating_add(1);
         }
@@ -530,8 +533,9 @@ impl StaticExtensionHandler for Cea861Handler {
 
     fn process(&self, blocks: &[&[u8; 128]], ctx: &mut StaticContext<'_>) {
         let options = *ctx.options();
-        for block in blocks {
-            cea861_process_into_sink(block, ctx, &options);
+        for (i, ext) in blocks.iter().enumerate() {
+            let block = ctx.block_number(i);
+            cea861_process_into_sink(ext, ctx, block, &options);
         }
     }
 }
@@ -767,7 +771,7 @@ mod tests {
         assert_eq!(caps.supported_modes[0].h_blank, Some(144));
 
         let mut sink = Collect::default();
-        cea861_process_into_sink(&ext, &mut sink, &DecodeOptions::new());
+        cea861_process_into_sink(&ext, &mut sink, Some(1), &DecodeOptions::new());
         assert_eq!(sink.0, [ambiguous]);
         assert_eq!(sink.1[0].h_blank, Some(144));
     }
@@ -796,7 +800,7 @@ mod tests {
         assert!(caps.supported_modes.iter().any(|m| m.h_blank == Some(272)));
 
         let mut sink = Collect::default();
-        cea861_process_into_sink(&ext, &mut sink, &DecodeOptions::new());
+        cea861_process_into_sink(&ext, &mut sink, Some(1), &DecodeOptions::new());
         assert_eq!(sink.0, [ambiguous]);
         assert!(sink.1.iter().any(|m| m.h_blank == Some(272)));
     }

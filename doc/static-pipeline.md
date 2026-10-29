@@ -109,7 +109,7 @@ an extension tag filter for `parse_edid`.
 
 The output context passed to `StaticExtensionHandler::process`. Handlers write decoded data
 through its methods rather than directly to a sink trait object, and read the caller's
-`DecodeOptions` from it. This allows new output channels to be added as `Option` fields in the
+`DecodeOptions` and each block's EDID block number from it. This allows new output channels to be added as `Option` fields in the
 future without changing the handler trait signature.
 
 ```rust
@@ -118,14 +118,18 @@ pub struct StaticContext<'a> { /* private */ }
 impl<'a> StaticContext<'a> {
     pub fn new(modes: &'a mut dyn ModeSink) -> Self; // default options
     pub fn with_options(self, options: DecodeOptions) -> Self;
+    pub fn with_block_numbers(self, block_numbers: &'a [u8]) -> Self;
     pub fn options(&self) -> &DecodeOptions;
+    pub fn block_number(&self, i: usize) -> Option<u8>; // of blocks[i]
     pub fn push_mode(&mut self, mode: VideoMode);
     pub fn push_warning(&mut self, w: EdidWarning);
 }
 ```
 
 A handler that decodes data the options apply to (such as Detailed Timing Descriptors)
-applies them.
+applies them. `block_number(i)` is the EDID block number of `blocks[i]` (0 for the base block,
+`n` for the `n`th block after it); the pipeline sets them, and a context built with `new`
+alone has none.
 
 ### `ModeSink`
 
@@ -200,8 +204,8 @@ speaker allocation — those require the alloc pipeline and are available throug
 On Cortex-M0 targets with small stacks, place the result in a `static mut` if stack pressure is
 a concern.
 
-**`preferred_image_size_mm`.** Populated correctly from the base block. Not populated from CEA
-DTDs — that field is a base-block concern and does not belong to the extension pipeline.
+**`preferred_image_size_mm`.** The image size of the preferred timing (the base block's first
+DTD), populated in every build. Other DTDs, CEA or base, do not set it.
 
 **Multi-block formats in bare `no_std`.** In `alloc`/`std` builds, the dispatch layer collects
 all fragments for a given tag and calls the handler once with the full slice. In bare `no_std`

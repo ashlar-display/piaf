@@ -5,7 +5,8 @@ use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::extension::ExtensionHandler;
+use crate::model::extension::{ExtensionHandler, HandlerContext};
+#[cfg(not(any(feature = "alloc", feature = "std")))]
 use crate::model::options::DecodeOptions;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Arc, Vec};
@@ -53,6 +54,7 @@ pub(super) fn decode_base_block(
         warn.push_warning(EdidWarning::InvalidManufacturerId);
     }
     descriptors::decode_descriptors_meta(base, caps);
+    caps.preferred_image_size_mm = timings::preferred_image_size_mm(base);
 }
 
 /// Decodes the EDID base block into [`DisplayCapabilities`].
@@ -71,16 +73,17 @@ impl ExtensionHandler for BaseBlockHandler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
-        self.process_with_options(blocks, caps, warnings, &DecodeOptions::new());
+        self.process_in_context(blocks, caps, warnings, &HandlerContext::default());
     }
 
-    fn process_with_options(
+    fn process_in_context(
         &self,
         blocks: &[&[u8; 128]],
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
-        options: &DecodeOptions,
+        ctx: &HandlerContext<'_>,
     ) {
+        let options = ctx.options();
         // Base handlers are always called with a single-element slice containing the
         // base block. Guard against an empty slice from a misconfigured call site.
         let Some(base) = blocks.first() else { return };
@@ -91,11 +94,12 @@ impl ExtensionHandler for BaseBlockHandler {
         descriptors::decode_descriptors_modes(base, caps);
         timings::decode_established_timings(base, caps);
         timings::decode_standard_timings(base, caps);
-        // Use decode_dtd_slot (not decode_detailed_timings) to preserve
-        // preferred_image_size_mm population and upgrade-in-place semantics.
+        caps.preferred_image_size_mm = timings::preferred_image_size_mm(base);
+        // Use decode_dtd_slot (not decode_detailed_timings) to preserve upgrade-in-place
+        // semantics.
         for i in 0..4u8 {
             let offset = 0x36 + (i as usize * 18);
-            timings::decode_dtd_slot(&base[offset..offset + 18], caps, i, options);
+            timings::decode_dtd_slot(&base[offset..offset + 18], caps, Some(0), i, options);
         }
     }
 }

@@ -122,9 +122,49 @@ pub(super) fn parse_colorimetry(block_data: &[u8]) -> Option<ColorimetryBlock> {
 // HDR Static Metadata Data Block (extended tag 0x06)
 // ---------------------------------------------------------------------------
 
+/// `2^(k/32)` for `k` in `0..32`, rounded to `f32` (`k = 16` is √2).
+const EXP2_32NDS: [f32; 32] = [
+    1.0,
+    1.0218972,
+    1.0442737,
+    1.0671405,
+    1.0905077,
+    1.1143868,
+    1.1387886,
+    1.1637249,
+    1.1892071,
+    1.2152474,
+    1.2418578,
+    1.269051,
+    1.2968396,
+    1.3252367,
+    1.3542556,
+    1.38391,
+    core::f32::consts::SQRT_2,
+    1.4451808,
+    1.4768262,
+    1.5091645,
+    1.5422108,
+    1.5759809,
+    1.6104903,
+    1.6457555,
+    1.6817929,
+    1.7186193,
+    1.7562522,
+    1.7947091,
+    1.8340081,
+    1.8741677,
+    1.9152066,
+    1.9571441,
+];
+
 /// Decodes the `50 × 2^(raw/32)` luminance encoding used in the HDR block.
+///
+/// `2^(raw/32)` is `2^(raw >> 5)`, exact in `f32`, times a table entry: `core` has no
+/// `exp2` without `std`.
 fn decode_luminance(raw: u8) -> f32 {
-    50.0 * (raw as f32 / 32.0).exp2()
+    let whole = f32::from(1u8 << (raw >> 5));
+    50.0 * EXP2_32NDS[usize::from(raw & 31)] * whole
 }
 
 pub(super) fn parse_hdr_static_metadata(block_data: &[u8]) -> Option<HdrStaticMetadata> {
@@ -134,9 +174,10 @@ pub(super) fn parse_hdr_static_metadata(block_data: &[u8]) -> Option<HdrStaticMe
 
     let max_luminance = block_data.get(3).map(|&b| decode_luminance(b));
     let max_fall = block_data.get(4).map(|&b| decode_luminance(b));
-    let min_luminance = block_data
-        .get(5)
-        .and_then(|&b| max_luminance.map(|max| max * (b as f32 / 255.0).powi(2) / 100.0));
+    let min_luminance = block_data.get(5).and_then(|&b| {
+        let ratio = b as f32 / 255.0;
+        max_luminance.map(|max| max * (ratio * ratio) / 100.0)
+    });
 
     Some(HdrStaticMetadata::new(
         eotf,
@@ -1003,6 +1044,16 @@ mod tests {
         assert!((max - 400.0).abs() < 0.1, "max={max}");
         let min = hdr.min_luminance.unwrap();
         assert!(min > 0.9 && min < 1.1, "min={min}");
+    }
+
+    // The table gives what `std`'s `exp2` gave, for every code.
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_hdr_luminance_matches_exp2() {
+        for raw in 0..=u8::MAX {
+            let expected = 50.0 * (f32::from(raw) / 32.0).exp2();
+            assert_eq!(decode_luminance(raw), expected, "raw={raw}");
+        }
     }
 
     #[test]
