@@ -4,6 +4,8 @@ use crate::model::capabilities::StaticContext;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::options::DecodeOptions;
+#[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Box, String, Vec};
 
 /// Processes one or more 128-byte EDID blocks and populates [`DisplayCapabilities`].
@@ -28,6 +30,61 @@ pub trait ExtensionHandler: core::fmt::Debug {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     );
+
+    /// [`process`][Self::process] with what the dispatch knows about the run and the
+    /// blocks: the caller's [`DecodeOptions`] and each block's number in the EDID.
+    ///
+    /// [`capabilities_from_edid_with_options`][crate::capabilities_from_edid_with_options]
+    /// and [`capabilities_from_edid`][crate::capabilities_from_edid] call this. The
+    /// default implementation ignores the context and calls `process`. A handler that
+    /// needs the context (such as one decoding Detailed Timing Descriptors, which the
+    /// options apply to and whose source names their block) overrides it, and its
+    /// `process` calls it with [`HandlerContext::default`].
+    fn process_in_context(
+        &self,
+        blocks: &[&[u8; 128]],
+        caps: &mut DisplayCapabilities,
+        warnings: &mut Vec<ParseWarning>,
+        ctx: &HandlerContext<'_>,
+    ) {
+        let _ = ctx;
+        self.process(blocks, caps, warnings);
+    }
+}
+
+/// What the dispatch passes to [`ExtensionHandler::process_in_context`] besides the blocks.
+///
+/// Holds the run's [`DecodeOptions`] and the EDID block number of each block in the
+/// handler's slice (0 for the base block, `n` for the `n`th block after it). Fields are
+/// private so the context can grow without changing the handler trait.
+#[cfg(any(feature = "alloc", feature = "std"))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HandlerContext<'a> {
+    options: DecodeOptions,
+    block_numbers: &'a [u8],
+}
+
+#[cfg(any(feature = "alloc", feature = "std"))]
+impl<'a> HandlerContext<'a> {
+    /// Creates a context with `options`, where `block_numbers[i]` is the EDID block number
+    /// of the handler's `blocks[i]`.
+    pub const fn new(options: DecodeOptions, block_numbers: &'a [u8]) -> Self {
+        Self {
+            options,
+            block_numbers,
+        }
+    }
+
+    /// The options the caller decodes with.
+    pub fn options(&self) -> &DecodeOptions {
+        &self.options
+    }
+
+    /// The EDID block number of the handler's `blocks[i]`; `None` when the context was
+    /// built without it (as by [`HandlerContext::default`]) or `i` is out of range.
+    pub fn block_number(&self, i: usize) -> Option<u8> {
+        self.block_numbers.get(i).copied()
+    }
 }
 
 /// Processes one or more 128-byte EDID blocks in a no-alloc context.

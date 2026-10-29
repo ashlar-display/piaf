@@ -3,10 +3,12 @@ pub use display_types::ParseWarning;
 
 /// A non-fatal condition encountered while parsing or processing an EDID block.
 ///
-/// Warnings are collected into [`ParsedEdid::warnings`][crate::ParsedEdid] (from the parser)
-/// and into [`DisplayCapabilities::warnings`][crate::DisplayCapabilities] (from handlers).
-/// In `alloc`/`std` builds each entry is a [`ParseWarning`]; use `downcast_ref` to recover the
-/// concrete type. In bare `no_std` builds this enum is used directly.
+/// The parser's warnings are this enum directly, in every build: see
+/// [`ParsedEdidRef::warnings`][crate::ParsedEdidRef::warnings], and with `alloc`,
+/// `ParsedEdid::warnings`. So are the warnings of
+/// [`StaticDisplayCapabilities`][crate::StaticDisplayCapabilities]. In
+/// `DisplayCapabilities::warnings` (`alloc`/`std`) each entry is a `ParseWarning`; use
+/// `downcast_ref` to recover the concrete type.
 #[non_exhaustive]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -44,6 +46,75 @@ pub enum EdidWarning {
     /// a few hundred MHz (fits comfortably in a `u32` after scaling by 10 000).
     #[error("DTD slot skipped: pixel clock overflow during refresh rate calculation")]
     DtdPixelClockOverflow,
+    /// A Detailed Timing Descriptor has non-zero borders, which EDID versions read
+    /// differently, and the caller did not settle the reading. The mode is kept.
+    ///
+    /// EDID 1.3 §3.12 counts the borders in the horizontal and vertical blanking; EDID 1.4
+    /// §3.12 does not. EDIDs in practice follow 1.3 (as edid-decode observes), and piaf
+    /// reads them that way: the line total is active + blanking, and
+    /// [`VideoMode::h_blank`][crate::VideoMode::h_blank] is the blanking minus both
+    /// borders. Under the 1.4 reading the blanking would be 2 × `h_border` larger, and the
+    /// refresh rate lower, at the same pixel clock. When the 1.3 reading leaves less than
+    /// the front porch and sync pulse, `h_blank` is left `None` and
+    /// [`DtdBlankingInconsistent`][EdidWarning::DtdBlankingInconsistent] follows.
+    ///
+    /// Not emitted when the caller settles the reading with
+    /// [`DtdBorderPolicy::Fixed`][crate::DtdBorderPolicy::Fixed].
+    #[error(
+        "DTD has non-zero borders ({h_border} pixels, {v_border} lines); its blanking is read as including them (EDID 1.3)"
+    )]
+    DtdBordersAmbiguous {
+        /// Horizontal border on each side, in pixels (byte 15).
+        h_border: u8,
+        /// Vertical border on each side, in lines (byte 16).
+        v_border: u8,
+    },
+    /// A Detailed Timing Descriptor's horizontal blanking, as read with respect to its
+    /// borders, is smaller than its front porch plus sync pulse: that reading is impossible.
+    /// The mode is kept with [`VideoMode::h_blank`][crate::VideoMode::h_blank] left `None`.
+    ///
+    /// The reading is EDID 1.3 (the blanking less both borders) unless the caller fixed
+    /// another with [`DtdBorderPolicy::Fixed`][crate::DtdBorderPolicy::Fixed]; the mode's
+    /// [`dtd_border_reading`][crate::VideoMode::dtd_border_reading] records a fixed one.
+    /// Without borders, or under EDID 1.4 (`h_blank` = `blanking`), the descriptor is
+    /// malformed. Under an unsettled 1.3 reading with borders, the 1.4 reading may still
+    /// hold; piaf does not switch to it, because the refresh rate and the mode's identity
+    /// depend on the reading too. A caller can fix the 1.4 reading and decode again.
+    #[error(
+        "DTD blanking {blanking} with borders {h_border} cannot hold front porch {h_front_porch} and sync {h_sync_width} under the reading taken; h_blank left unset"
+    )]
+    DtdBlankingInconsistent {
+        /// Horizontal blanking as stored in the descriptor, in pixels.
+        blanking: u16,
+        /// Horizontal border on each side, in pixels.
+        h_border: u8,
+        /// Horizontal front porch, in pixels.
+        h_front_porch: u16,
+        /// Horizontal sync pulse width, in pixels.
+        h_sync_width: u16,
+    },
+    /// An HDMI Audio Data Block declares MS NonMixed support with a maximum stream count of
+    /// one (edid-decode and libdisplay-info both flag this). The flag is kept as declared.
+    #[error("HDMI Audio Data Block: MS NonMixed support declared with a single stream")]
+    HdmiAudioNonMixedWithoutMultiStream,
+    /// An HDMI Audio Data Block claims more 3D audio descriptors (plus the speaker
+    /// allocation that follows them, 4 bytes each) than it holds; none are taken.
+    #[error(
+        "HDMI Audio Data Block claims {claimed} 3D audio descriptors, but holds only {available_bytes} bytes for them"
+    )]
+    HdmiAudio3dDescriptorsExceedBlock {
+        /// The number of 3D audio descriptors claimed (byte 2, bits 2:0).
+        claimed: u8,
+        /// The bytes left in the block for descriptors.
+        available_bytes: u8,
+    },
+    /// An HDMI 3D Audio Descriptor has a format other than L-PCM or One Bit Audio, the
+    /// only two it may carry; the descriptor is skipped.
+    #[error("HDMI 3D Audio Descriptor with unsupported format code {code}; skipped")]
+    HdmiAudio3dUnsupportedFormat {
+        /// The audio format code (byte 0, bits 3:0).
+        code: u8,
+    },
     /// The number of extension blocks declared in the base block exceeds the parser's
     /// safety limit. Only the first `limit` blocks were parsed; the rest were ignored.
     ///

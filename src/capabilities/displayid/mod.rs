@@ -7,9 +7,9 @@ use crate::model::capabilities::StaticContext;
 use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
-#[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::extension::ExtensionHandler;
 use crate::model::extension::StaticExtensionHandler;
+#[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::extension::{ExtensionHandler, HandlerContext};
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Arc, Vec};
 
@@ -19,7 +19,7 @@ pub(crate) use timing::decode_type_vii_descriptor_to_mode;
 use timing::process_data_blocks;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use display_types::DisplayIdCapabilities;
+pub use display_types::{DisplayIdCapabilities, DisplayIdImageSize, ImageSizeUnit};
 
 /// Processes DisplayID extension blocks (tag `0x70`).
 ///
@@ -166,6 +166,17 @@ impl ExtensionHandler for DisplayIdHandler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
+        self.process_in_context(blocks, caps, warnings, &HandlerContext::default());
+    }
+
+    fn process_in_context(
+        &self,
+        blocks: &[&[u8; 128]],
+        caps: &mut DisplayCapabilities,
+        warnings: &mut Vec<ParseWarning>,
+        ctx: &HandlerContext<'_>,
+    ) {
+        let options = ctx.options();
         let Some(first) = blocks.first() else { return };
 
         let (version, _section_byte_count, product_type, extension_count) =
@@ -200,8 +211,8 @@ impl ExtensionHandler for DisplayIdHandler {
                 warnings.push(Arc::new(w));
             }
             let payload = fragment_payload(block);
-            process_data_blocks(payload, version, caps);
-            scan_all_metadata_blocks(payload, version, caps, &mut did, warnings);
+            process_data_blocks(payload, version, caps, options);
+            scan_all_metadata_blocks(payload, version, caps, &mut did, warnings, options);
         }
 
         caps.set_extension_data(0x70, did);
@@ -241,11 +252,12 @@ impl StaticExtensionHandler for DisplayIdHandler {
         }
 
         // Process data blocks from all fragments.
+        let options = *ctx.options();
         for block in blocks {
             if let Some(w) = check_displayid_section(block) {
                 ctx.push_warning(w);
             }
-            process_data_blocks(fragment_payload(block), version, ctx);
+            process_data_blocks(fragment_payload(block), version, ctx, &options);
         }
     }
 }
@@ -554,11 +566,66 @@ mod tests {
         let mut caps = crate::model::StaticDisplayCapabilities::<4>::default();
         let mut ctx = crate::model::StaticContext::new(&mut caps);
         StaticExtensionHandler::process(&DisplayIdHandler, &[&block], &mut ctx);
-        assert_eq!(caps.num_warnings, 1, "expected exactly one warning");
-        assert_eq!(
-            caps.warnings[0],
-            Some(EdidWarning::DisplayIdChecksumMismatch)
+        assert_eq!(caps.warnings(), [EdidWarning::DisplayIdChecksumMismatch]);
+    }
+
+    /// A DisplayID 2.x block with a CTA DisplayID block whose collection holds a VTB-EXT
+    /// with one DTB: 1920×1080, blanking 280, front porch 88, sync 44, 8-pixel horizontal
+    /// borders.
+    fn displayid_with_bordered_vtb_ext() -> [u8; 128] {
+        // Extended tag data block (23 bytes): VTB-EXT, version 1, one DTB.
+        let vtb_ext_header = [0xE0 | 23, 0x03, 0x01, 0x01, 0x00, 0x00];
+        let dtb = [
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0, 0, 0, 0, 8, 0, 0x1E,
+        ];
+        let mut data_block = vec![TAG_V2_CTA_DISPLAYID, 0x00, 24];
+        data_block.extend_from_slice(&vtb_ext_header);
+        data_block.extend_from_slice(&dtb);
+        make_displayid_block(DISPLAYID_V2, &data_block)
+    }
+
+    #[test]
+    fn test_handler_applies_options_to_embedded_cta_dtds() {
+        use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
+
+        let block = displayid_with_bordered_vtb_ext();
+        let options = DecodeOptions::new()
+            .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        let mut caps = DisplayCapabilities::default();
+        let mut warnings: Vec<ParseWarning> = Vec::new();
+        ExtensionHandler::process_in_context(
+            &DisplayIdHandler,
+            &[&block],
+            &mut caps,
+            &mut warnings,
+            &HandlerContext::new(options, &[1]),
         );
+
+        // The block is decoded for its modes and for its CTA metadata; both read 1.4, so
+        // they give one mode.
+        assert_eq!(caps.supported_modes.len(), 1);
+        let mode = &caps.supported_modes[0];
+        assert_eq!(mode.dtd_border_reading, Some(DtdBorderReading::Edid14));
+        assert_eq!(mode.h_blank, Some(280));
+        assert!(caps.warnings.is_empty() && warnings.is_empty());
+    }
+
+    #[test]
+    fn test_static_handler_applies_options_to_embedded_cta_dtds() {
+        use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
+
+        let block = displayid_with_bordered_vtb_ext();
+
+        let options = DecodeOptions::new()
+            .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        let mut caps = crate::model::StaticDisplayCapabilities::<4>::default();
+        let mut ctx = crate::model::StaticContext::new(&mut caps).with_options(options);
+        StaticExtensionHandler::process(&DisplayIdHandler, &[&block], &mut ctx);
+
+        let mode = caps.iter_modes().next().unwrap();
+        assert_eq!(mode.dtd_border_reading, Some(DtdBorderReading::Edid14));
+        assert_eq!(mode.h_blank, Some(280));
+        assert!(caps.warnings().is_empty());
     }
 
     #[test]

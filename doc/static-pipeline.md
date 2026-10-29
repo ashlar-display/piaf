@@ -34,41 +34,60 @@ for mode in caps.iter_modes() {
 ### `capabilities_from_edid_static`
 
 ```rust
-pub fn capabilities_from_edid_static<const N: usize>(
-    parsed: &ParsedEdid,
+pub fn capabilities_from_edid_static<const N: usize, T: EdidSource>(
+    parsed: &T,
     handlers: &[&dyn StaticExtensionHandler],
 ) -> StaticDisplayCapabilities<N>
 ```
 
 Available unconditionally. Decodes the base block through the same logic as
 `capabilities_from_edid`, then dispatches each extension block to the first handler whose
-`tag()` matches. In bare `no_std` builds, extension blocks are not stored in `ParsedEdid`, so
-the result contains base-block data only.
+`tag()` matches. In bare `no_std` builds, pass the `ParsedEdidRef` from `parse_edid`: it
+borrows the extension blocks, so they are processed at every tier.
+
+The result's warnings are the parser's first, then the base block's, then the handlers'.
+`warnings_dropped()` includes the warnings the parser could not store.
 
 `capabilities_from_edid_static` is a **replacement** for `capabilities_from_edid`, not a
 complement. Calling both on the same EDID will process extension blocks twice.
 
+### `capabilities_from_edid_static_with_options`
+
+```rust
+pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>(
+    parsed: &T,
+    handlers: &[&dyn StaticExtensionHandler],
+    options: DecodeOptions,
+) -> StaticDisplayCapabilities<N>
+```
+
+`capabilities_from_edid_static` with the caller's `DecodeOptions`, which it calls with the
+defaults. The options apply to the base block and reach every handler through
+`StaticContext::options()`, so one setting covers the whole EDID.
+
 ### `StaticDisplayCapabilities<const MAX_MODES: usize>`
 
 Contains all scalar fields from `DisplayCapabilities` (manufacturer, timings, chromaticity,
-etc.) plus fixed-capacity arrays for modes and warnings:
+etc.) plus a fixed-capacity array for modes and private, fixed-capacity warning storage:
 
 ```rust
 pub supported_modes: [Option<VideoMode>; MAX_MODES],
 pub num_modes: usize,
-pub warnings: [Option<EdidWarning>; 8],
-pub num_warnings: usize,
 ```
 
-Convenience iterators:
+Accessors:
 
 ```rust
 pub fn iter_modes(&self) -> impl Iterator<Item = &VideoMode>
+pub fn warnings(&self) -> &[EdidWarning]
 pub fn iter_warnings(&self) -> impl Iterator<Item = &EdidWarning>
+pub fn warnings_dropped(&self) -> u16
 ```
 
-Modes and warnings beyond capacity are silently dropped. 64 is a reasonable default for
-`MAX_MODES`; real displays rarely declare more than ~40 modes.
+Modes beyond capacity are silently dropped. 64 is a reasonable default for `MAX_MODES`;
+real displays rarely declare more than ~40 modes. Up to `MAX_STATIC_WARNINGS` (8) warnings
+are stored; `warnings_dropped()` counts the ones that did not fit (saturating at
+`u16::MAX`). The warning API is the same in every build.
 
 ### `StaticExtensionHandler`
 
@@ -89,17 +108,28 @@ an extension tag filter for `parse_edid`.
 ### `StaticContext`
 
 The output context passed to `StaticExtensionHandler::process`. Handlers write decoded data
-through its methods rather than directly to a sink trait object. This allows new output channels
-to be added as `Option` fields in the future without changing the handler trait signature.
+through its methods rather than directly to a sink trait object, and read the caller's
+`DecodeOptions` and each block's EDID block number from it. This allows new output channels to be added as `Option` fields in the
+future without changing the handler trait signature.
 
 ```rust
 pub struct StaticContext<'a> { /* private */ }
 
-impl StaticContext<'_> {
+impl<'a> StaticContext<'a> {
+    pub fn new(modes: &'a mut dyn ModeSink) -> Self; // default options
+    pub fn with_options(self, options: DecodeOptions) -> Self;
+    pub fn with_block_numbers(self, block_numbers: &'a [u8]) -> Self;
+    pub fn options(&self) -> &DecodeOptions;
+    pub fn block_number(&self, i: usize) -> Option<u8>; // of blocks[i]
     pub fn push_mode(&mut self, mode: VideoMode);
     pub fn push_warning(&mut self, w: EdidWarning);
 }
 ```
+
+A handler that decodes data the options apply to (such as Detailed Timing Descriptors)
+applies them. `block_number(i)` is the EDID block number of `blocks[i]` (0 for the base block,
+`n` for the `n`th block after it); the pipeline sets them, and a context built with `new`
+alone has none.
 
 ### `ModeSink`
 
@@ -174,12 +204,8 @@ speaker allocation — those require the alloc pipeline and are available throug
 On Cortex-M0 targets with small stacks, place the result in a `static mut` if stack pressure is
 a concern.
 
-**`preferred_image_size_mm`.** Populated correctly from the base block. Not populated from CEA
-DTDs — that field is a base-block concern and does not belong to the extension pipeline.
-
-**Extension blocks in bare `no_std`.** `ParsedEdid` does not store extension blocks at the bare
-`no_std` tier (no `alloc` feature). `capabilities_from_edid_static` returns base-block data
-only in that configuration; passing handlers has no effect.
+**`preferred_image_size_mm`.** The image size of the preferred timing (the base block's first
+DTD), populated in every build. Other DTDs, CEA or base, do not set it.
 
 **Multi-block formats in bare `no_std`.** In `alloc`/`std` builds, the dispatch layer collects
 all fragments for a given tag and calls the handler once with the full slice. In bare `no_std`

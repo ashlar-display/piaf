@@ -23,22 +23,48 @@ that belong in handler unit tests.
 
 ### Fixture tests
 
-PIAF should maintain a fixture corpus containing:
+Fixtures are real EDID captures in `testdata/`. Tests in `tests/fixtures.rs` (and a few in
+`tests/serde.rs` and `tests/static_pipeline.rs`) load them by path and assert on the
+decoded fields. These fixtures make it easier to improve the parser without unintentionally
+changing behavior.
 
-- valid EDID captures,
-- malformed inputs,
-- edge cases,
-- truncated or corrupted data.
-
-These fixtures make it easier to improve the parser without unintentionally changing behavior.
-
-A suggested layout:
 ```text
 testdata/
- ├── valid/
- ├── invalid/
- └── edge/
+ ├── valid/     truthful EDIDs
+ ├── edge/      parse, but lie or are odd: placeholder sizes, a driver board's own EDID,
+ │              0×0 cm in the base block
+ └── invalid/   rejected by the parser today: truncated or corrupted captures
 ```
+
+A fixture is the raw capture, unmodified, named as `examples/capture_fixture.rs` names it
+(`<display name or manufacturer ID + product code>_<manufacturer ID>.bin`, lowercase,
+words joined with `_`). [`CONTRIBUTING.md`](../CONTRIBUTING.md#contributing-edid-fixtures)
+describes how to capture and contribute one.
+
+Each fixture added from now on has a context file next to it, with the same name and a
+`.toml` extension. It records what is true about the display, as opposed to what its EDID
+claims, so a test can check a decoded value or a warning against reality, not only against
+piaf's previous output. The fixtures that existed before this convention have none.
+
+| Table     | Key                 | Meaning                                                                         |
+|-----------|---------------------|---------------------------------------------------------------------------------|
+| `capture` | `contributor`       | Who captured it                                                                 |
+|           | `date`              | Capture date                                                                    |
+|           | `method`            | How: `capture_fixture`, Linux sysfs, Windows registry, …                        |
+|           | `os`                | Operating system of the capture                                                 |
+|           | `connection`        | Direct, via a driver board, via adapters, …                                     |
+|           | `serials`           | `original` or `anonymised`                                                      |
+| `display` | `make_model`        | The display, as sold                                                            |
+|           | `panel`             | The panel; for a driver board, the panel behind it                              |
+|           | `native_resolution` | `[width, height]` in pixels                                                     |
+|           | `measured_size_mm`  | `[width, height]` of the active area                                            |
+|           | `size_source`       | `measured` or `manufacturer spec`                                               |
+|           | `reference`         | URL of the source for spec values, e.g. a spec sheet or a display database page |
+|           | `running_mode`      | What the OS actually drives                                                     |
+| `notes`   | `known_issues`      | List of what the EDID gets wrong or does oddly                                  |
+
+Every key is optional: a gap is better than a guess. New keys may be added as tests need
+them.
 
 ### Fuzzing
 

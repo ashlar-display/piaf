@@ -1,12 +1,24 @@
 # PIAF
 
-[![CI](https://github.com/DracoWhitefire/piaf/actions/workflows/ci.yml/badge.svg)](https://github.com/DracoWhitefire/piaf/actions/workflows/ci.yml)
+[![CI](https://github.com/ashlar-display/piaf/actions/workflows/ci.yml/badge.svg)](https://github.com/ashlar-display/piaf/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/piaf.svg)](https://crates.io/crates/piaf)
 [![docs.rs](https://docs.rs/piaf/badge.svg)](https://docs.rs/piaf)
-[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/DracoWhitefire/piaf/blob/main/LICENSE)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/ashlar-display/piaf/blob/main/LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rustc-1.85+-orange.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html)
 [![SLSA Level 2](https://slsa.dev/images/gh-badge-level2.svg)](https://slsa.dev)
 [![trusted publishing only](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcrates.io%2Fapi%2Fv1%2Fcrates%2Fpiaf&query=%24.crate.trustpub_only&label=trusted%20publishing%20only)](#verifying-releases)
+
+> **Part of [Ashlar](https://ashlar-display.org)** — a display connection stack in Rust,
+> HDMI 2.1 first: from EDID parsing through mode negotiation to FRL link training.
+>
+> [display-types](https://github.com/ashlar-display/display-types) ·
+> **piaf** ·
+> [concordance](https://github.com/ashlar-display/concordance) ·
+> [cartouche](https://github.com/ashlar-display/cartouche) ·
+> [culvert](https://github.com/ashlar-display/culvert) ·
+> [plumbob](https://github.com/ashlar-display/plumbob) ·
+> [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) ·
+> [hdmi-hal-i2c-dev](https://github.com/ashlar-display/hdmi-hal-i2c-dev)
 
 A Rust library for decoding binary capability data into a clean, typed model, specialized for EDID.
 
@@ -21,7 +33,8 @@ input slice. `capabilities_from_edid` then runs the registered extension handler
 structure and produces a `DisplayCapabilities` — the typed, stable model your application
 works with. Keeping these steps separate means you can inspect the raw parse result for
 debugging, or run multiple handler configurations over the same parsed data without re-parsing.
-Use `parse_edid_owned` to get an owned `ParsedEdid` that can outlive the input buffer.
+With `alloc` or `std`, use `parse_edid_owned` to get an owned `ParsedEdid` that can outlive the
+input buffer.
 
 ```rust
 use piaf::{parse_edid, capabilities_from_edid, ExtensionLibrary, ScreenSize};
@@ -152,6 +165,36 @@ let caps: StaticDisplayCapabilities<64> =
 Static handlers extract modes only — audio, VSDB, colorimetry, and similar rich metadata
 require the dynamic pipeline.
 
+## Decode options
+
+Where EDID data allows more than one reading, piaf takes the one EDIDs follow in practice
+and warns. `DecodeOptions` lets the caller settle the reading instead; both pipelines take
+them, through `capabilities_from_edid_with_options` and
+`capabilities_from_edid_static_with_options`, and apply them to every block of the EDID.
+
+The first option is the reading of a Detailed Timing Descriptor's borders. EDID 1.3 counts
+them in the blanking, EDID 1.4 does not, which changes the refresh rate and `h_blank` of a
+DTD with borders. By default piaf reads 1.3 and emits `DtdBordersAmbiguous`;
+`DtdBorderPolicy::Fixed` applies the given reading, records it in
+`VideoMode::dtd_border_reading` and drops the warning:
+
+```rust
+use piaf::{
+    capabilities_from_edid_with_options, parse_edid, DecodeOptions, DtdBorderPolicy,
+    DtdBorderReading, ExtensionLibrary,
+};
+
+let library = ExtensionLibrary::with_standard_handlers();
+let parsed = parse_edid(&bytes, &library)?;
+let options = DecodeOptions::new()
+    .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+let caps = capabilities_from_edid_with_options(&parsed, &library, options);
+```
+
+EDIDs in practice use the 1.3 reading whatever version they declare, so the declared
+version is not evidence of it. To follow it anyway, read it from the base block and set
+`Fixed`; the `DtdBorderPolicy` documentation shows how.
+
 ## Features
 
 | Feature | Default | Description                                              |
@@ -175,9 +218,11 @@ In bare `no_std`, `parse_edid` returns a `ParsedEdidRef<'_>` that borrows extens
 directly from the input slice — no allocator needed. Both base-block fields and extension-block
 modes are available through `capabilities_from_edid_static` at all build tiers.
 
-`parse_edid_owned` returns a `ParsedEdid` that copies block bytes into owned storage; in bare
-`no_std` the extension block field is absent (alloc-gated), so prefer `ParsedEdidRef` from
-`parse_edid` when extension block access matters.
+`parse_edid_owned` and `ParsedEdid`, the owned form that copies the blocks, need `alloc` or
+`std`; in bare `no_std`, keep the input buffer and use the `ParsedEdidRef` from `parse_edid`.
+The parse warnings are available in every build through `warnings()` / `iter_warnings()`;
+without `alloc`, `parse_edid` stores up to `MAX_PARSE_WARNINGS` (8) and `warnings_dropped()`
+counts the rest.
 
 ### Fields in `DisplayCapabilities` available in all build configurations
 
@@ -208,7 +253,6 @@ modes are available through `capabilities_from_edid_static` at all build tiers.
 | `max_pixel_clock_mhz`               | `Option<u16>`                                               |
 | `timing_formula`                    | `Option<TimingFormula>`                                     |
 | `color_management`                  | `Option<ColorManagementData>`                               |
-| `warnings`                          | `[Option<EdidWarning>; 8]` (first 8; use `iter_warnings()`) |
 
 These fields are absent from `DisplayCapabilities` without `alloc` or `std`:
 
@@ -216,11 +260,13 @@ These fields are absent from `DisplayCapabilities` without `alloc` or `std`:
 |-------------------|--------------------------------------------------------------------------------|
 | `supported_modes` | Variable-length list of video modes                                            |
 | `extension_data`  | Type-erased handler data via `Arc<dyn ExtensionData>`                          |
-| `warnings` (full) | `Vec<ParseWarning>` in alloc builds; use `iter_warnings()` for portable access |
+| `warnings`        | `Vec<ParseWarning>`; type-erased handler warnings                              |
 
-**For supported modes without heap allocation**, use `capabilities_from_edid_static` instead.
-It returns `StaticDisplayCapabilities<N>`, which holds all the scalar fields above plus a
-fixed-capacity `[Option<VideoMode>; N]` array accessible via `iter_modes()`.
+**For supported modes and warnings without heap allocation**, use
+`capabilities_from_edid_static` instead. It returns `StaticDisplayCapabilities<N>`, which holds
+all the scalar fields above plus a fixed-capacity `[Option<VideoMode>; N]` array accessible via
+`iter_modes()`, and up to `MAX_STATIC_WARNINGS` (8) `EdidWarning`s through `warnings()` /
+`iter_warnings()`, with `warnings_dropped()` counting any that did not fit.
 
 Fixed-length string fields (`MonitorString`, `ManufacturerId`) use fixed-size byte
 array newtypes with `Display` and `Deref<Target = str>` impls, so they behave like
@@ -246,7 +292,7 @@ Fields decoded by `BaseBlockHandler`:
 | Established timings I/II    | bytes `0x23`–`0x25`                  | Bitmap of 17 legacy modes decoded as `VideoMode` entries                                             |
 | Established timings III     | descriptor `0xF7`                    | Extended bitmap of 44 additional VESA modes                                                          |
 | Standard timings            | bytes `0x26`–`0x35`                  | Up to 8 resolution + refresh rate pairs decoded as `VideoMode` entries                               |
-| Detailed timing descriptors | slots `0x36`, `0x48`, `0x5A`, `0x6C` | Full DTD parameters decoded as `VideoMode`; first non-zero image size sets `preferred_image_size_mm` |
+| Detailed timing descriptors | slots `0x36`, `0x48`, `0x5A`, `0x6C` | Full DTD parameters decoded as `VideoMode`; DTD 0's image size sets `preferred_image_size_mm`        |
 | Monitor name                | descriptor `0xFC`                    | Display name string                                                                                  |
 | Serial number string        | descriptor `0xFF`                    | Serial number as text                                                                                |
 | Unspecified text            | descriptor `0xFE`                    | Manufacturer-defined ASCII string                                                                    |
@@ -293,7 +339,7 @@ Data blocks decoded by `DisplayIdHandler` (extension tag `0x70`):
 | Tag    | Block                        | Output                                                                                                                                                                                                                                                                                    |
 |--------|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `0x00` | Product Identification       | `manufacturer`, `product_code`, `display_name`, `serial_number_string`, `manufacture_date` on `DisplayCapabilities`                                                                                                                                                                       |
-| `0x01` | Display Parameters           | `preferred_image_size_mm`, `native_pixels` on `DisplayCapabilities`                                                                                                                                                                                                                       |
+| `0x01` | Display Parameters           | `image_size` (0.1 mm) on `DisplayIdCapabilities`; `native_pixels` on `DisplayCapabilities`                                                                                                                                                                                                |
 | `0x02` | Color Characteristics        | `chromaticity` on `DisplayCapabilities`                                                                                                                                                                                                                                                   |
 | `0x03` | Type I Detailed Timings      | `supported_modes` (20-byte descriptors)                                                                                                                                                                                                                                                   |
 | `0x04` | Type II Detailed Timings     | `supported_modes` (10-byte descriptors)                                                                                                                                                                                                                                                   |
@@ -325,7 +371,7 @@ DisplayID 2.x sections (version byte `0x20`) use a disjoint tag space at `0x20`�
 | Tag    | Block                              | Output                                                                                                                         |
 |--------|------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | `0x20` | Product Identification             | `manufacturer_oui` (on `DisplayIdCapabilities`); `product_code`, `serial_number`, `manufacture_date`, `display_name` on `DisplayCapabilities` |
-| `0x21` | Display Parameters                 | `display_params_v2` (chromaticity, luminance, gamma, display technology, scan orientation, audio routing); `preferred_image_size_mm`, `native_pixels`, `color_bit_depth` mirrored on `DisplayCapabilities` |
+| `0x21` | Display Parameters                 | `display_params_v2` (chromaticity, luminance, gamma, display technology, scan orientation, audio routing), `image_size` (0.1 or 1 mm) on `DisplayIdCapabilities`; `native_pixels`, `color_bit_depth` mirrored on `DisplayCapabilities` |
 | `0x22` | Type VII Detailed Timing           | `supported_modes` (20-byte descriptors with 24-bit pixel clock)                                                                |
 | `0x23` | Type VIII Enumerated Timing Code   | `supported_modes` via DMT/VIC/HDMI VIC lookup                                                                                  |
 | `0x24` | Type IX Formula-Based Timing       | `supported_modes` with `cvt_algorithm` (CVT-RB1/RB2/RB3, RB-with-CVT-RB1/RB2) and `y420` flag from byte 0; **CVT-RB v1, v2, and v3** fully expanded to `pixel_clock_khz` + blanking via `display_types::compute_type_ix_timing` (RB-with-CVT-RB1/RB2 variants pending) |
@@ -377,16 +423,24 @@ Extended documentation lives under [`doc/`](doc/).
 ## Verifying releases
 
 Releases are built on GitHub Actions and attested with
-[SLSA Build Level 2](https://slsa.dev) provenance (from the next release after 0.4.1). To
-verify a release `.crate` against its signed provenance, install the
+[SLSA Build Level 2](https://slsa.dev) provenance (from 0.4.2). To verify a release
+`.crate` against its signed provenance, install the
 [GitHub CLI](https://cli.github.com/) and run:
 
 ```sh
-gh attestation verify piaf-X.Y.Z.crate --repo DracoWhitefire/piaf
+gh attestation verify piaf-X.Y.Z.crate --repo ashlar-display/piaf
+```
+
+The release from before the repository moved to the `ashlar-display` organization (0.4.2)
+was attested under its previous owner, and verifies against it:
+
+```sh
+gh attestation verify piaf-0.4.2.crate --owner DracoWhitefire \
+  --signer-repo DracoWhitefire/piaf
 ```
 
 The attested `.crate` is attached to each
-[GitHub release](https://github.com/DracoWhitefire/piaf/releases).
+[GitHub release](https://github.com/ashlar-display/piaf/releases).
 
 Those releases are also uploaded through crates.io
 [trusted publishing](https://rust-lang.github.io/rfcs/3691-trusted-publishing-cratesio.html): the publish
@@ -405,4 +459,4 @@ Versions up to 0.4.1 were uploaded with an API token (0.1.0 and 0.4.1 by hand, 0
 
 ## License
 
-Licensed under the [Mozilla Public License 2.0](https://github.com/DracoWhitefire/piaf/blob/main/LICENSE).
+Licensed under the [Mozilla Public License 2.0](https://github.com/ashlar-display/piaf/blob/main/LICENSE).

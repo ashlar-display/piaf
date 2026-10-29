@@ -25,6 +25,7 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
+          targets: thumbv7em-none-eabi
 
       - name: Cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -52,10 +53,10 @@ jobs:
         run: cargo test --locked --features serde
 
       - name: Build (alloc only)
-        run: cargo build --locked --no-default-features --features alloc
+        run: cargo build --locked --no-default-features --features alloc --target thumbv7em-none-eabi
 
       - name: Build (no_std)
-        run: cargo build --locked --no-default-features
+        run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
   coverage:
     name: Coverage
@@ -73,7 +74,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
           tool: cargo-llvm-cov
 

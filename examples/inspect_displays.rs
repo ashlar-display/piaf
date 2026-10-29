@@ -641,9 +641,13 @@ fn main() {
                                 }
                                 if let Some(ha) = &cea.hdmi_audio {
                                     println!(
-                                        "  HDMI Audio:   MSA={}, {} SAD(s)",
-                                        ha.multi_stream_audio,
-                                        ha.audio_descriptors.len()
+                                        "  HDMI Audio:   max streams {}{}, {} 3D audio descriptor(s){}",
+                                        ha.max_streams,
+                                        if ha.ms_non_mixed { " (non-mixed)" } else { "" },
+                                        ha.audio_3d_descriptors.len(),
+                                        ha.speaker_allocation_3d
+                                            .map(|a| format!(", 3D layout {:?}", a.channels))
+                                            .unwrap_or_default()
                                     );
                                 }
                                 if !cea.infoframe_descriptors.is_empty() {
@@ -966,8 +970,8 @@ fn main() {
                                 }
                             }
 
-                            if !parsed.warnings.is_empty() {
-                                println!("  Parse warnings: {:?}", parsed.warnings);
+                            if !parsed.warnings().is_empty() {
+                                println!("  Parse warnings: {:?}", parsed.warnings());
                             }
                         }
                         Err(e) => {
