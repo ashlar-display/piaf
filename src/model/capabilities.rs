@@ -1,10 +1,15 @@
 use crate::model::diagnostics::EdidWarning;
 use crate::model::manufacture::{ManufacturerId, MonitorString};
+use crate::model::options::DecodeOptions;
+use crate::model::warnings::InlineWarnings;
 
 pub use display_types::{
     CvtAlgorithm, ModeSource, RefreshRate, StereoMode, SyncDefinition, TypeIxStereoMode, VideoMode,
 };
-pub use display_types::{DisplayCapabilities, ExtensionData};
+// From its module: display-types re-exports it at the root only with `alloc`.
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use display_types::ExtensionData;
+pub use display_types::capabilities::DisplayCapabilities;
 
 /// Sink for mode and warning writes from extension handlers.
 ///
@@ -13,8 +18,11 @@ pub use display_types::{DisplayCapabilities, ExtensionData};
 /// [`ExtensionHandler`][crate::ExtensionHandler] and `StaticExtensionHandler` — write their output
 /// through this trait so the core parsing logic is shared across build configurations.
 pub trait ModeSink {
-    /// Push a decoded video mode. Duplicate modes (same width, height, refresh rate, and
-    /// interlace flag) are silently ignored.
+    /// Push a decoded video mode. Implementations ignore duplicates, but differ in what a
+    /// duplicate is: [`DisplayCapabilities`] drops only a mode equal in every field (so two
+    /// timings for the same resolution and rate are both kept), `StaticDisplayCapabilities`
+    /// any mode with the same width, height, refresh rate and interlace flag (the first
+    /// wins).
     fn push_mode(&mut self, mode: VideoMode);
     /// Push a non-fatal warning encountered while processing a block.
     fn push_warning(&mut self, w: EdidWarning);
@@ -26,17 +34,51 @@ pub trait ModeSink {
 /// This allows the context to grow over time — additional sink types can be added as
 /// `Option` fields without changing the handler trait signature.
 ///
-/// Currently wraps a [`ModeSink`] for video mode and warning output. Future fields will
-/// provide access to identity, colorimetry, and other sink types as the static pipeline
-/// is extended.
+/// Currently wraps a [`ModeSink`] for video mode and warning output, the run's
+/// [`DecodeOptions`] and the EDID block number of each block. Future fields will provide access to identity, colorimetry, and other
+/// sink types as the static pipeline is extended.
 pub struct StaticContext<'a> {
     modes: &'a mut dyn ModeSink,
+    options: DecodeOptions,
+    block_numbers: &'a [u8],
 }
 
 impl<'a> StaticContext<'a> {
-    /// Creates a new context backed by `modes`.
+    /// Creates a new context backed by `modes`, with the default [`DecodeOptions`] and no
+    /// block numbers.
     pub fn new(modes: &'a mut dyn ModeSink) -> Self {
-        Self { modes }
+        Self {
+            modes,
+            options: DecodeOptions::new(),
+            block_numbers: &[],
+        }
+    }
+
+    /// Sets the decode options, returning the updated context.
+    pub fn with_options(mut self, options: DecodeOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Sets the block numbers, returning the updated context: `block_numbers[i]` is the
+    /// EDID block number (0 for the base block, `n` for the `n`th block after it) of the
+    /// handler's `blocks[i]`.
+    pub fn with_block_numbers(mut self, block_numbers: &'a [u8]) -> Self {
+        self.block_numbers = block_numbers;
+        self
+    }
+
+    /// The EDID block number of the handler's `blocks[i]`; `None` when the context was
+    /// built without block numbers or `i` is out of range.
+    pub fn block_number(&self, i: usize) -> Option<u8> {
+        self.block_numbers.get(i).copied()
+    }
+
+    /// The options the caller decodes with. A handler applies them to the data it decodes,
+    /// e.g. [`dtd_border_policy`][DecodeOptions::dtd_border_policy] to any Detailed Timing
+    /// Descriptor in its blocks.
+    pub fn options(&self) -> &DecodeOptions {
+        &self.options
     }
 
     /// Pushes a decoded video mode. Duplicate modes are silently ignored.
@@ -62,8 +104,10 @@ impl ModeSink for StaticContext<'_> {
 
 /// `ModeSink` implementation for `DisplayCapabilities` (alloc/std builds only).
 ///
-/// `push_mode` deduplicates by (width, height, refresh_rate, interlaced) before appending.
-/// `push_warning` delegates to the inherent `push_warning` method from display-types.
+/// `push_mode` drops a mode equal in every field to one already present (full
+/// `PartialEq`, so modes with the same resolution and rate but different timing details
+/// are both kept). `push_warning` delegates to the inherent `push_warning` method from
+/// display-types.
 #[cfg(any(feature = "alloc", feature = "std"))]
 impl ModeSink for DisplayCapabilities {
     fn push_mode(&mut self, mode: VideoMode) {
@@ -85,8 +129,9 @@ impl ModeSink for DisplayCapabilities {
 /// Contains the same scalar fields as [`DisplayCapabilities`] plus a fixed-capacity mode list.
 /// Use `MAX_MODES` to set the maximum number of video modes that can be stored; 64 is a
 /// reasonable default for most displays (real displays rarely declare more than ~40 modes).
-/// Modes beyond the capacity are silently dropped, matching the behaviour of the 8-entry
-/// warning cap.
+/// Modes beyond the capacity are silently dropped. Warnings are capped at
+/// [`MAX_STATIC_WARNINGS`]; those beyond it are counted in
+/// [`warnings_dropped`][Self::warnings_dropped].
 ///
 /// Produced by `capabilities_from_edid_static`.
 ///
@@ -235,14 +280,13 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     pub supported_modes: [Option<VideoMode>; MAX_MODES],
     /// Number of valid entries in [`supported_modes`][Self::supported_modes].
     pub num_modes: usize,
-    /// Non-fatal conditions collected from the parser and all handlers.
-    ///
-    /// Capped at 8 entries; warnings beyond the first 8 are silently dropped.
-    /// Use [`iter_warnings`][Self::iter_warnings] for a safe iterator.
-    pub warnings: [Option<EdidWarning>; 8],
-    /// Number of valid entries in [`warnings`][Self::warnings].
-    pub num_warnings: usize,
+    // Non-fatal conditions collected from the parser and all handlers.
+    warnings: InlineWarnings<MAX_STATIC_WARNINGS>,
 }
+
+/// The number of warnings a [`StaticDisplayCapabilities`] stores; further warnings are
+/// counted in [`warnings_dropped`][StaticDisplayCapabilities::warnings_dropped].
+pub const MAX_STATIC_WARNINGS: usize = 8;
 
 impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
     fn default() -> Self {
@@ -297,8 +341,7 @@ impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
             // `core::array::from_fn` constructs each slot individually.
             supported_modes: core::array::from_fn(|_| None),
             num_modes: 0,
-            warnings: Default::default(),
-            num_warnings: 0,
+            warnings: InlineWarnings::new(),
         }
     }
 }
@@ -309,9 +352,25 @@ impl<const MAX_MODES: usize> StaticDisplayCapabilities<MAX_MODES> {
         self.supported_modes[..self.num_modes].iter().flatten()
     }
 
-    /// Returns an iterator over collected warnings.
+    /// The collected warnings, in the order they occurred.
+    pub fn warnings(&self) -> &[EdidWarning] {
+        self.warnings.as_slice()
+    }
+
+    /// Returns an iterator over collected warnings, in the order they occurred.
     pub fn iter_warnings(&self) -> impl Iterator<Item = &EdidWarning> {
-        self.warnings[..self.num_warnings].iter().flatten()
+        self.warnings().iter()
+    }
+
+    /// The number of warnings that did not fit in the [`MAX_STATIC_WARNINGS`] slots
+    /// (saturating at `u16::MAX`).
+    pub fn warnings_dropped(&self) -> u16 {
+        self.warnings.dropped()
+    }
+
+    // Counts warnings dropped upstream (by the parser) in `warnings_dropped`.
+    pub(crate) fn add_warnings_dropped(&mut self, n: u16) {
+        self.warnings.add_dropped(n);
     }
 }
 
@@ -340,10 +399,6 @@ impl<const MAX_MODES: usize> ModeSink for StaticDisplayCapabilities<MAX_MODES> {
     }
 
     fn push_warning(&mut self, w: EdidWarning) {
-        if self.num_warnings < 8 {
-            self.warnings[self.num_warnings] = Some(w);
-            self.num_warnings += 1;
-        }
-        // Warnings beyond capacity are silently dropped.
+        self.warnings.push(w);
     }
 }

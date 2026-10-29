@@ -9,7 +9,9 @@ mod hdmi_vsdb;
 pub use audio::{AudioFormat, AudioFormatInfo, AudioSampleRates, ShortAudioDescriptor};
 pub use display_types::cea861::Cea861Flags;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use display_types::cea861::{Cea861Capabilities, HdmiAudioBlock};
+pub use display_types::cea861::{
+    Audio3dChannels, Audio3dSpeakerAllocation, Cea861Capabilities, HdmiAudioBlock,
+};
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use extended_blocks::{
     ColorimetryBlock, ColorimetryFlags, DtcPointEncoding, HdmiDscMaxSlices, HdmiForumDsc,
@@ -35,13 +37,16 @@ use crate::model::capabilities::VideoMode;
 use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
-#[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::extension::ExtensionHandler;
 use crate::model::extension::StaticExtensionHandler;
+#[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::extension::{ExtensionHandler, HandlerContext};
+use crate::model::options::DecodeOptions;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Arc, Vec};
 #[cfg(any(feature = "alloc", feature = "std"))]
 use audio::parse_audio_data_block;
+#[cfg(any(feature = "alloc", feature = "std"))]
+use audio::parse_hdmi_audio_block;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use extended_blocks::{
     EXT_TAG_COLORIMETRY, EXT_TAG_HDMI_AUDIO, EXT_TAG_HDR_DYNAMIC_METADATA,
@@ -70,6 +75,17 @@ impl ExtensionHandler for Cea861Handler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
+        self.process_in_context(blocks, caps, warnings, &HandlerContext::default());
+    }
+
+    fn process_in_context(
+        &self,
+        blocks: &[&[u8; 128]],
+        caps: &mut DisplayCapabilities,
+        warnings: &mut Vec<ParseWarning>,
+        ctx: &HandlerContext<'_>,
+    ) {
+        let options = ctx.options();
         let Some(first) = blocks.first() else { return };
         let flags = Cea861Flags::from_bits_truncate(first[3]);
 
@@ -81,7 +97,8 @@ impl ExtensionHandler for Cea861Handler {
             .unwrap_or_else(|| Cea861Capabilities::new(flags));
         cea_caps.flags |= flags;
 
-        for ext in blocks {
+        for (i, ext) in blocks.iter().enumerate() {
+            let block = ctx.block_number(i);
             // Parse the data block collection: bytes 4 through dtd_offset-1.
             // When dtd_offset == 0 the spec says no DTDs are present, so data blocks
             // may fill the rest of the block (bytes 4–127).
@@ -98,6 +115,7 @@ impl ExtensionHandler for Cea861Handler {
                     caps,
                     &mut cea_caps,
                     warnings,
+                    options,
                 );
             }
 
@@ -107,7 +125,7 @@ impl ExtensionHandler for Cea861Handler {
                 let mut offset = dtd_offset;
                 let mut dtd_index: u8 = 0;
                 while offset + 18 <= 127 {
-                    decode_dtd_slot(&ext[offset..offset + 18], caps, dtd_index);
+                    decode_dtd_slot(&ext[offset..offset + 18], caps, block, dtd_index, options);
                     offset += 18;
                     dtd_index = dtd_index.saturating_add(1);
                 }
@@ -136,6 +154,7 @@ pub(crate) fn parse_cea861_data_block_collection(
     caps: &mut DisplayCapabilities,
     cea_caps: &mut Cea861Capabilities,
     warnings: &mut Vec<ParseWarning>,
+    options: &DecodeOptions,
 ) {
     let mut i = 0;
     while i < collection.len() {
@@ -185,7 +204,7 @@ pub(crate) fn parse_cea861_data_block_collection(
                 cea_caps.vesa_transfer_characteristic =
                     parse_vesa_transfer_characteristic(block_data);
             }
-            0x07 => handle_extended_tag_block(block_data, caps, cea_caps),
+            0x07 => handle_extended_tag_block(block_data, caps, cea_caps, options),
             _ => {}
         }
 
@@ -255,6 +274,7 @@ fn handle_extended_tag_block(
     block_data: &[u8],
     caps: &mut DisplayCapabilities,
     cea_caps: &mut Cea861Capabilities,
+    options: &DecodeOptions,
 ) {
     match block_data.first().copied() {
         Some(EXT_TAG_VSVDB) => {
@@ -271,7 +291,9 @@ fn handle_extended_tag_block(
             cea_caps.vesa_display_device = parse_vesa_display_device(&block_data[1..]);
         }
         Some(EXT_TAG_VTB_EXT) => {
-            if let Some(vtb) = parse_vtb_ext(&block_data[1..]) {
+            if let Some(vtb) =
+                parse_vtb_ext(&block_data[1..], options, &mut |w| caps.push_warning(w))
+            {
                 for timing in &vtb.timings {
                     push_mode_dedup(&mut caps.supported_modes, timing.clone());
                 }
@@ -350,13 +372,9 @@ fn handle_extended_tag_block(
             cea_caps.hf_scdb = parse_hf_scdb(&block_data[1..]);
         }
         Some(EXT_TAG_HDMI_AUDIO) if cea_caps.hdmi_audio.is_none() => {
-            // block_data[0] = ext tag; block_data[1] = flags; block_data[2..] = SADs.
-            let multi_stream_audio = block_data.get(1).is_some_and(|&b| b & 0x08 != 0);
-            let audio_descriptors = block_data
-                .get(2..)
-                .map(parse_audio_data_block)
-                .unwrap_or_default();
-            cea_caps.hdmi_audio = Some(HdmiAudioBlock::new(multi_stream_audio, audio_descriptors));
+            cea_caps.hdmi_audio = Some(parse_hdmi_audio_block(&block_data[1..], &mut |w| {
+                caps.push_warning(w)
+            }));
         }
         _ => {}
     }
@@ -368,7 +386,14 @@ fn handle_extended_tag_block(
 /// [`VideoMode`][crate::VideoMode] entries from VICs and timing data blocks. Reused
 /// from both the CEA-861 extension static path and the DisplayID 2.x CTA DisplayID
 /// block (tag `0x81`) static path.
-pub(crate) fn cea861_collection_into_sink(collection: &[u8], sink: &mut dyn ModeSink) {
+pub(crate) fn cea861_collection_into_sink(
+    collection: &[u8],
+    sink: &mut dyn ModeSink,
+    options: &DecodeOptions,
+) {
+    // Only VTB-EXT carries DTDs here, and it is decoded in alloc builds only.
+    #[cfg(not(any(feature = "alloc", feature = "std")))]
+    let _ = options;
     let mut i = 0;
     while i < collection.len() {
         let header = collection[i];
@@ -417,7 +442,12 @@ pub(crate) fn cea861_collection_into_sink(collection: &[u8], sink: &mut dyn Mode
             #[cfg(any(feature = "alloc", feature = "std"))]
             match block_data.first().copied() {
                 Some(EXT_TAG_VTB_EXT) => {
-                    if let Some(vtb) = parse_vtb_ext(&block_data[1..]) {
+                    let mut found = Vec::new();
+                    let vtb = parse_vtb_ext(&block_data[1..], options, &mut |w| found.push(w));
+                    for w in found {
+                        sink.push_warning(w);
+                    }
+                    if let Some(vtb) = vtb {
                         for timing in vtb.timings {
                             sink.push_mode(timing);
                         }
@@ -467,7 +497,12 @@ pub(crate) fn cea861_collection_into_sink(collection: &[u8], sink: &mut dyn Mode
 /// Allocation-free counterpart to [`Cea861Handler::process`]: produces
 /// [`VideoMode`][crate::VideoMode] entries (SVDs, DTDs, and — in `alloc`/`std` builds —
 /// VTB-EXT/T7VTDB/T8VTDB/T10VTDB/Y420 VDB entries) without requiring heap allocation.
-pub(crate) fn cea861_process_into_sink(ext: &[u8; 128], sink: &mut dyn ModeSink) {
+pub(crate) fn cea861_process_into_sink(
+    ext: &[u8; 128],
+    sink: &mut dyn ModeSink,
+    block: Option<u8>,
+    options: &DecodeOptions,
+) {
     let dtd_offset = ext[2] as usize;
     let collection_end = if dtd_offset == 0 {
         128
@@ -476,7 +511,7 @@ pub(crate) fn cea861_process_into_sink(ext: &[u8; 128], sink: &mut dyn ModeSink)
     };
 
     if collection_end > 4 {
-        cea861_collection_into_sink(&ext[4..collection_end], sink);
+        cea861_collection_into_sink(&ext[4..collection_end], sink, options);
     }
 
     // Parse Detailed Timing Descriptors.
@@ -484,7 +519,7 @@ pub(crate) fn cea861_process_into_sink(ext: &[u8; 128], sink: &mut dyn ModeSink)
         let mut offset = dtd_offset;
         let mut dtd_index: u8 = 0;
         while offset + 18 <= 127 {
-            decode_dtd_slot_into_sink(&ext[offset..offset + 18], sink, dtd_index);
+            decode_dtd_slot_into_sink(&ext[offset..offset + 18], sink, block, dtd_index, options);
             offset += 18;
             dtd_index = dtd_index.saturating_add(1);
         }
@@ -497,8 +532,10 @@ impl StaticExtensionHandler for Cea861Handler {
     }
 
     fn process(&self, blocks: &[&[u8; 128]], ctx: &mut StaticContext<'_>) {
-        for block in blocks {
-            cea861_process_into_sink(block, ctx);
+        let options = *ctx.options();
+        for (i, ext) in blocks.iter().enumerate() {
+            let block = ctx.block_number(i);
+            cea861_process_into_sink(ext, ctx, block, &options);
         }
     }
 }
@@ -699,6 +736,75 @@ mod tests {
         );
     }
 
+    /// Collects what the no-alloc path emits.
+    #[derive(Default)]
+    struct Collect(Vec<EdidWarning>, Vec<VideoMode>);
+    impl ModeSink for Collect {
+        fn push_mode(&mut self, mode: VideoMode) {
+            self.1.push(mode);
+        }
+        fn push_warning(&mut self, w: EdidWarning) {
+            self.0.push(w);
+        }
+    }
+
+    fn edid_warnings(caps: &DisplayCapabilities) -> Vec<EdidWarning> {
+        caps.iter_warnings()
+            .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
+            .collect()
+    }
+
+    #[test]
+    fn test_cea_dtd_with_borders_warns_in_both_pipelines() {
+        let mut ext = [0u8; 128];
+        ext[2] = 4;
+        write_dtd_2560x1440_144(&mut ext, 4);
+        ext[4 + 15] = 8; // 8-pixel horizontal border: blanking 160 − 16 = 144
+        let ambiguous = EdidWarning::DtdBordersAmbiguous {
+            h_border: 8,
+            v_border: 0,
+        };
+
+        let mut caps = DisplayCapabilities::default();
+        ExtensionHandler::process(&Cea861Handler, &[&ext], &mut caps, &mut Vec::new());
+        assert_eq!(edid_warnings(&caps), [ambiguous]);
+        assert_eq!(caps.supported_modes[0].h_blank, Some(144));
+
+        let mut sink = Collect::default();
+        cea861_process_into_sink(&ext, &mut sink, Some(1), &DecodeOptions::new());
+        assert_eq!(sink.0, [ambiguous]);
+        assert_eq!(sink.1[0].h_blank, Some(144));
+    }
+
+    #[test]
+    fn test_vtb_ext_dtb_warnings_reach_both_pipelines() {
+        // Data block collection with one extended-tag block (VTB-EXT, 0x03): version 1, one
+        // Detailed Timing Block (1920×1080, blanking 280, border 4), no CVTs or STs.
+        let mut ext = [0u8; 128];
+        let payload_len = 1 + 4 + 18; // ext tag + header + DTB
+        ext[4] = (7 << 5) | payload_len as u8;
+        ext[5] = 0x03;
+        ext[6..10].copy_from_slice(&[0x01, 0x01, 0x00, 0x00]);
+        ext[10..28].copy_from_slice(&[
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0x00, 0, 0, 0, 4, 0, 0x1E,
+        ]);
+        ext[2] = (4 + 1 + payload_len) as u8; // DTDs (none) start after the collection
+        let ambiguous = EdidWarning::DtdBordersAmbiguous {
+            h_border: 4,
+            v_border: 0,
+        };
+
+        let mut caps = DisplayCapabilities::default();
+        ExtensionHandler::process(&Cea861Handler, &[&ext], &mut caps, &mut Vec::new());
+        assert_eq!(edid_warnings(&caps), [ambiguous]);
+        assert!(caps.supported_modes.iter().any(|m| m.h_blank == Some(272)));
+
+        let mut sink = Collect::default();
+        cea861_process_into_sink(&ext, &mut sink, Some(1), &DecodeOptions::new());
+        assert_eq!(sink.0, [ambiguous]);
+        assert!(sink.1.iter().any(|m| m.h_blank == Some(272)));
+    }
+
     #[test]
     fn test_cea_dtd_zero_clock_skipped() {
         // A DTD slot whose first two bytes are 0x00 is a monitor descriptor and must be skipped.
@@ -822,83 +928,103 @@ mod tests {
         assert_eq!(cea.y420_capability_map, vec![0b0000_0101]);
     }
 
-    #[test]
-    fn test_hdmi_audio_block_with_msa_and_sads() {
-        // HDMI Audio Data Block: outer tag=7, length=8 → (7<<5)|8 = 0xE8
-        // payload: ext tag 0x12, flags byte (MSA=bit3 set), then two SADs (6 bytes) = 8 bytes
-        // SAD 1: LPCM (AFC=1), 2ch, 44.1kHz+48kHz, 16-bit
-        // SAD 2: AC-3 (AFC=2), 6ch, 48kHz, max bitrate 640kbps
+    /// An extension block whose data block collection is one HDMI Audio Data Block with
+    /// `payload` after the extended tag.
+    fn ext_with_hdmi_audio(payload: &[u8]) -> [u8; 128] {
         let mut ext = [0u8; 128];
-        // collection = ext[4..13] = 9 bytes (1 header + 8 payload)
-        ext[2] = 13;
-        ext[4] = (7 << 5) | 8; // outer tag=7, length=8
+        ext[4] = (7 << 5) | (1 + payload.len()) as u8;
         ext[5] = 0x12; // EXT_TAG_HDMI_AUDIO
-        ext[6] = 0x08; // flags: MSA set (bit 3)
-        // SAD 1: LPCM 2ch
-        ext[7] = (1 << 3) | 1; // AFC=1 (LPCM), max_ch=2 → (AFC<<3)|(ch-1) = 0x09
-        ext[8] = 0x06; // 44.1kHz (bit1) + 48kHz (bit2)
-        ext[9] = 0x01; // 16-bit
-        // SAD 2: AC-3 6ch
-        ext[10] = (2 << 3) | 5; // AFC=2 (AC-3), max_ch=6 → 0x15
-        ext[11] = 0x04; // 48kHz only
-        ext[12] = 0x50; // max bitrate = 0x50 * 8 = 640 kbps
+        ext[6..6 + payload.len()].copy_from_slice(payload);
+        ext[2] = (6 + payload.len()) as u8;
+        ext
+    }
 
+    fn hdmi_audio(ext: &[u8; 128]) -> (HdmiAudioBlock, Vec<EdidWarning>) {
         let mut caps = DisplayCapabilities::default();
-        ExtensionHandler::process(&Cea861Handler, &[&ext], &mut caps, &mut Vec::new());
-
-        let cea = caps.get_extension_data::<Cea861Capabilities>(0x02).unwrap();
-        let hdmi_audio = cea.hdmi_audio.as_ref().unwrap();
-        assert!(hdmi_audio.multi_stream_audio);
-        assert_eq!(hdmi_audio.audio_descriptors.len(), 2);
-        assert!(matches!(
-            hdmi_audio.audio_descriptors[0].format,
-            AudioFormat::Lpcm
-        ));
-        assert_eq!(hdmi_audio.audio_descriptors[0].max_channels, 2);
-        assert!(matches!(
-            hdmi_audio.audio_descriptors[1].format,
-            AudioFormat::Ac3
-        ));
-        assert_eq!(hdmi_audio.audio_descriptors[1].max_channels, 6);
+        ExtensionHandler::process(&Cea861Handler, &[ext], &mut caps, &mut Vec::new());
+        let block = caps
+            .get_extension_data::<Cea861Capabilities>(0x02)
+            .unwrap()
+            .hdmi_audio
+            .clone()
+            .unwrap();
+        (block, edid_warnings(&caps))
     }
 
     #[test]
-    fn test_hdmi_audio_block_no_msa() {
-        let mut ext = [0u8; 128];
-        // collection = ext[4..10] = 6 bytes (1 header + 5 payload: ext_tag+flags+3-byte SAD)
-        ext[2] = 10;
-        ext[4] = (7 << 5) | 5; // outer tag=7, length=5
-        ext[5] = 0x12; // EXT_TAG_HDMI_AUDIO
-        ext[6] = 0x00; // flags: MSA not set
-        // One LPCM SAD
-        ext[7] = (1 << 3) | 1;
-        ext[8] = 0x04;
-        ext[9] = 0x01;
-
-        let mut caps = DisplayCapabilities::default();
-        ExtensionHandler::process(&Cea861Handler, &[&ext], &mut caps, &mut Vec::new());
-
-        let cea = caps.get_extension_data::<Cea861Capabilities>(0x02).unwrap();
-        let hdmi_audio = cea.hdmi_audio.as_ref().unwrap();
-        assert!(!hdmi_audio.multi_stream_audio);
-        assert_eq!(hdmi_audio.audio_descriptors.len(), 1);
+    fn test_hdmi_audio_block_multi_stream_and_3d_audio() {
+        // Byte 0: max streams − 1 = 1, MS NonMixed. Byte 1: one 3D audio descriptor.
+        // 3D descriptor: L-PCM (1), 10 channels (9), 48 + 96 kHz, 16 + 24 bit.
+        // Speaker allocation: FL/FR + FC, layout 22.2 (2 << 4).
+        let ext = ext_with_hdmi_audio(&[
+            0x05, 0x01, // header bytes
+            0x01, 0x09, 0x14, 0x05, // 3D audio descriptor
+            0x05, 0x00, 0x00, 0x20, // 3D speaker allocation
+        ]);
+        let (block, warnings) = hdmi_audio(&ext);
+        assert!(warnings.is_empty());
+        assert_eq!((block.max_streams, block.ms_non_mixed), (2, true));
+        assert!(block.multi_stream());
+        let d = &block.audio_3d_descriptors[..];
+        assert_eq!(d.len(), 1);
+        assert_eq!((d[0].format, d[0].max_channels), (AudioFormat::Lpcm, 10));
+        assert_eq!(
+            d[0].sample_rates,
+            AudioSampleRates::HZ_48000 | AudioSampleRates::HZ_96000
+        );
+        assert_eq!(
+            d[0].format_info,
+            AudioFormatInfo::Lpcm {
+                depth_16: true,
+                depth_20: false,
+                depth_24: true
+            }
+        );
+        let sa = block.speaker_allocation_3d.unwrap();
+        assert_eq!(sa.channels, display_types::cea861::Audio3dChannels::Ch22_2);
+        assert_eq!(
+            sa.speakers.channels,
+            SpeakerAllocationFlags::FL_FR | SpeakerAllocationFlags::FC
+        );
     }
 
     #[test]
-    fn test_hdmi_audio_block_flags_only() {
-        // Block with no SADs — just ext tag + flags byte.
-        let mut ext = [0u8; 128];
-        ext[2] = 7;
-        ext[4] = (7 << 5) | 2; // length=2: ext tag + flags, no SADs
-        ext[5] = 0x12;
-        ext[6] = 0x08; // MSA set
+    fn test_hdmi_audio_block_single_stream_no_3d() {
+        let (block, warnings) = hdmi_audio(&ext_with_hdmi_audio(&[0x00, 0x00]));
+        assert!(warnings.is_empty());
+        assert_eq!(block.max_streams, 1);
+        assert!(!block.multi_stream());
+        assert!(block.audio_3d_descriptors.is_empty());
+        assert!(block.speaker_allocation_3d.is_none());
+        // A block with only the first byte is valid too.
+        let (block, _) = hdmi_audio(&ext_with_hdmi_audio(&[0x03]));
+        assert_eq!(block.max_streams, 4);
+    }
 
-        let mut caps = DisplayCapabilities::default();
-        ExtensionHandler::process(&Cea861Handler, &[&ext], &mut caps, &mut Vec::new());
-
-        let cea = caps.get_extension_data::<Cea861Capabilities>(0x02).unwrap();
-        let hdmi_audio = cea.hdmi_audio.as_ref().unwrap();
-        assert!(hdmi_audio.multi_stream_audio);
-        assert!(hdmi_audio.audio_descriptors.is_empty());
+    #[test]
+    fn test_hdmi_audio_block_warnings() {
+        // MS NonMixed with a single stream.
+        let (_, w) = hdmi_audio(&ext_with_hdmi_audio(&[0x04, 0x00]));
+        assert_eq!(w, [EdidWarning::HdmiAudioNonMixedWithoutMultiStream]);
+        // Two descriptors claimed, room for one plus nothing: none taken.
+        let (block, w) = hdmi_audio(&ext_with_hdmi_audio(&[0x00, 0x02, 0x01, 0x01, 0x04, 0x01]));
+        assert!(block.audio_3d_descriptors.is_empty());
+        assert_eq!(
+            w,
+            [EdidWarning::HdmiAudio3dDescriptorsExceedBlock {
+                claimed: 2,
+                available_bytes: 4
+            }]
+        );
+        // A 3D descriptor in AC-3 (2): skipped; the L-PCM one is kept.
+        let (block, w) = hdmi_audio(&ext_with_hdmi_audio(&[
+            0x00, 0x02, 0x02, 0x05, 0x04, 0x00, 0x01, 0x01, 0x04, 0x01, 0x01, 0x00, 0x00, 0x10,
+        ]));
+        assert_eq!(w, [EdidWarning::HdmiAudio3dUnsupportedFormat { code: 2 }]);
+        assert_eq!(block.audio_3d_descriptors.len(), 1);
+        assert_eq!(
+            block.speaker_allocation_3d.map(|a| a.channels),
+            Some(display_types::cea861::Audio3dChannels::Ch10_2)
+        );
     }
 }

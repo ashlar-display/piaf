@@ -1,7 +1,7 @@
 use piaf::{
-    EdidWarning, ExtensionLibrary, ExtensionTagRegistry, KnownExtensions, RefreshRate,
-    STANDARD_HANDLERS, StaticDisplayCapabilities, capabilities_from_edid,
-    capabilities_from_edid_static, parse_edid,
+    EdidWarning, ExtensionLibrary, ExtensionTagRegistry, KnownExtensions, MAX_STATIC_WARNINGS,
+    ModeSink, ParsedEdid, RefreshRate, STANDARD_HANDLERS, StaticDisplayCapabilities,
+    capabilities_from_edid, capabilities_from_edid_static, parse_edid,
 };
 
 fn load(path: &str) -> Vec<u8> {
@@ -274,4 +274,93 @@ fn test_static_same_modes_as_alloc() {
         alloc_modes, static_modes,
         "alloc and static pipelines produced different mode lists"
     );
+}
+
+// --- Warning storage ---
+
+#[test]
+fn static_warnings_beyond_capacity_are_counted() {
+    let mut caps = StaticDisplayCapabilities::<4>::default();
+    assert!(caps.warnings().is_empty());
+    assert_eq!(caps.warnings_dropped(), 0);
+
+    for tag in 0..(MAX_STATIC_WARNINGS as u8 + 2) {
+        caps.push_warning(EdidWarning::UnknownExtension(tag));
+    }
+
+    let expected: Vec<EdidWarning> = (0..MAX_STATIC_WARNINGS as u8)
+        .map(EdidWarning::UnknownExtension)
+        .collect();
+    assert_eq!(caps.warnings(), expected.as_slice());
+    assert!(caps.iter_warnings().eq(expected.iter()));
+    assert_eq!(caps.warnings_dropped(), 2);
+}
+
+#[test]
+fn static_warnings_dropped_saturates() {
+    let mut caps = StaticDisplayCapabilities::<4>::default();
+    for _ in 0..(MAX_STATIC_WARNINGS + u16::MAX as usize + 1) {
+        caps.push_warning(EdidWarning::DescriptorParseFailed);
+    }
+    assert_eq!(caps.warnings().len(), MAX_STATIC_WARNINGS);
+    assert_eq!(caps.warnings_dropped(), u16::MAX);
+}
+
+/// The unused slots hold a placeholder warning; `Debug` must not print it.
+#[test]
+fn static_warnings_debug_omits_unused_slots() {
+    let mut caps = StaticDisplayCapabilities::<4>::default();
+    assert!(!format!("{caps:?}").contains("DescriptorParseFailed"));
+
+    caps.push_warning(EdidWarning::UnknownExtension(0x42));
+    let debug = format!("{caps:?}");
+    assert!(
+        debug.contains("items: [UnknownExtension(66)], dropped: 0"),
+        "{debug}"
+    );
+    assert!(!debug.contains("DescriptorParseFailed"), "{debug}");
+}
+
+/// An EDID whose parse emits `SizeMismatch` (one stray byte) and `UnknownExtension(0x55)`;
+/// its all-zero manufacturer ID adds the base block's `InvalidManufacturerId`.
+fn edid_with_parse_warnings() -> Vec<u8> {
+    let mut bytes = edid_with_cea_vdb(&[16]);
+    bytes[128] = 0x55;
+    let ext_sum: u8 = bytes[128..255].iter().fold(0u8, |a, &x| a.wrapping_add(x));
+    bytes[255] = 0u8.wrapping_sub(ext_sum);
+    bytes.push(0);
+    bytes
+}
+
+const PARSE_THEN_BASE_WARNINGS: [EdidWarning; 3] = [
+    EdidWarning::SizeMismatch {
+        expected: 256,
+        actual: 257,
+    },
+    EdidWarning::UnknownExtension(0x55),
+    EdidWarning::InvalidManufacturerId,
+];
+
+/// The parser's warnings reach the static output, ahead of the base block's, from
+/// `ParsedEdidRef` and `ParsedEdid` alike, and match the dynamic pipeline's.
+#[test]
+fn static_pipeline_keeps_parse_warnings() {
+    let bytes = edid_with_parse_warnings();
+    let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+
+    let caps: StaticDisplayCapabilities<8> =
+        capabilities_from_edid_static(&parsed, STANDARD_HANDLERS);
+    assert_eq!(caps.warnings(), PARSE_THEN_BASE_WARNINGS);
+
+    let dynamic = capabilities_from_edid(&parsed, &ExtensionLibrary::with_standard_handlers());
+    let dynamic: Vec<EdidWarning> = dynamic
+        .iter_warnings()
+        .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
+        .collect();
+    assert_eq!(dynamic, PARSE_THEN_BASE_WARNINGS);
+
+    let owned = ParsedEdid::from(parsed);
+    let caps: StaticDisplayCapabilities<8> =
+        capabilities_from_edid_static(&owned, STANDARD_HANDLERS);
+    assert_eq!(caps.warnings(), PARSE_THEN_BASE_WARNINGS);
 }
