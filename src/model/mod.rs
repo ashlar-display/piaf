@@ -8,7 +8,7 @@ pub use prelude::{Box, String, Vec};
 /// Extension handler traits and registries.
 pub mod extension;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use extension::ExtensionHandler;
+pub use extension::{ExtensionHandler, HandlerContext};
 pub use extension::{
     ExtensionLibrary, ExtensionMetadata, ExtensionTagRegistry, KnownExtensions,
     StaticExtensionHandler,
@@ -20,9 +20,18 @@ pub mod diagnostics;
 pub use diagnostics::ParseWarning;
 pub use diagnostics::{EdidError, EdidWarning};
 
+/// Decoding options.
+pub mod options;
+pub use options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
+
+/// Private warning storage.
+pub(crate) mod warnings;
+
 /// Parsed EDID intermediate representation.
 pub mod edid;
-pub use edid::{EdidSource, EdidVersion, ParsedEdid, ParsedEdidRef};
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use edid::ParsedEdid;
+pub use edid::{EdidSource, EdidVersion, ParsedEdidRef};
 
 /// Color-related model types.
 pub mod color;
@@ -74,7 +83,7 @@ pub mod capabilities;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use capabilities::ExtensionData;
 pub use capabilities::{
-    CvtAlgorithm, DisplayCapabilities, ModeSink, RefreshRate, StaticContext,
+    CvtAlgorithm, DisplayCapabilities, MAX_STATIC_WARNINGS, ModeSink, RefreshRate, StaticContext,
     StaticDisplayCapabilities, StereoMode, SyncDefinition, TypeIxStereoMode, VideoMode,
 };
 pub use display_types::{

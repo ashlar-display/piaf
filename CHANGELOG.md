@@ -19,6 +19,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-exported. New warnings: `EdidWarning::HdmiAudioNonMixedWithoutMultiStream`,
   `HdmiAudio3dDescriptorsExceedBlock` (none taken), `HdmiAudio3dUnsupportedFormat` (that
   descriptor skipped).
+- **Warning storage is private, with the same API in every build.** Public fields whose
+  type or presence depended on the `alloc` feature broke `no_std` code as soon as another
+  crate in the build enabled `alloc`; the warnings now sit behind accessors, and where
+  storage is fixed, warnings that do not fit are counted instead of silently dropped.
+  - `StaticDisplayCapabilities`: the `warnings` and `num_warnings` fields are replaced by
+    `warnings() -> &[EdidWarning]`, `iter_warnings()` and `warnings_dropped() -> u16`
+    (saturating). It stores up to the new `MAX_STATIC_WARNINGS` (8), as before.
+  - `ParsedEdidRef`: the `warnings` field (`Vec<ParseWarning>` with `alloc`,
+    `[Option<EdidWarning>; 8]` without) and `num_warnings` are replaced by the same three
+    accessors. The warnings are `EdidWarning`s in every build: with `alloc`,
+    `iter_warnings()` yields `&EdidWarning` instead of `&ParseWarning`, so no
+    `downcast_ref` is needed. Without `alloc`, `parse_edid` stores up to the new
+    `parser::MAX_PARSE_WARNINGS` (8) and counts the rest.
+  - `ParsedEdid`, `parse_edid_owned` and `From<ParsedEdidRef>` need `alloc` or `std`.
+    Without them, `ParsedEdid` held only the base block, so the static pipeline given one
+    silently decoded no extension block; keep the input buffer and use the `ParsedEdidRef`
+    from `parse_edid` instead. Its `warnings` field is replaced by the same accessors
+    (`warnings_dropped()` is always 0); `base_block` and `extensions` stay public.
+  - `EdidSource` gains `parse_warnings() -> &[EdidWarning]` and
+    `parse_warnings_dropped() -> u16`, both defaulted, so existing implementations still
+    compile. The default `propagate_parse_warnings` now copies `parse_warnings()`; it was a
+    no-op.
+- **DTD sources name their EDID block** (display-types 0.5). `ModeSource::DtdIndex(n)`,
+  the index within the descriptor's block, is replaced by `ModeSource::Dtd { block, index }`,
+  `block` being the EDID block number (0 for the base block). A CTA-861 extension's first
+  DTD was `DtdIndex(0)` like the base block's; the preferred timing is now
+  `Dtd { block: 0, index: 0 }`, so replace a match on `DtdIndex(0)` with that. A
+  `Cea861Handler::process` called directly is not told its block's number, so its DTDs
+  have no source; the pipelines always tell it.
+- **`preferred_image_size_mm` is the preferred timing's image size** (display-types 0.5):
+  the size in the base block's first Detailed Timing Descriptor, `None` when that
+  descriptor gives none. It was the first non-zero size among all DTDs, a CTA-861
+  extension's included, and a DisplayID Display Parameters block replaced it. DisplayID's
+  image size now has its own field (below). For an EDID whose first DTD carries its size,
+  as is usual, the value does not change.
 
 ### Added
 
@@ -34,11 +69,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`EdidWarning::DtdBordersAmbiguous`** for a Detailed Timing Descriptor with non-zero
   borders. EDID 1.3 counts the borders in the blanking, EDID 1.4 does not; piaf reads
   them as 1.3 (as EDIDs in practice do, and as its refresh rate already did), so
-  `h_blank` is the blanking minus both borders, and the warning says so.
+  `h_blank` is the blanking minus both borders, and the warning says so. Not emitted when
+  the caller fixes the reading (below).
 - **`EdidWarning::DtdBlankingInconsistent`** when that reading leaves less than the front
   porch and sync pulse (or, without borders, the blanking is too short for them): the
-  mode is kept with `h_blank` left `None`, and the warning carries the raw values for a
-  caller that applies the EDID 1.4 reading itself.
+  mode is kept with `h_blank` left `None`, and the warning carries the raw values. The
+  check applies to whichever reading is taken.
+- **Decode options.** `DecodeOptions` (`#[non_exhaustive]`, the same in every build) lets
+  the caller settle readings the data leaves ambiguous, for the whole EDID:
+  `capabilities_from_edid_with_options` and `capabilities_from_edid_static_with_options`
+  take them, and the functions without the suffix use the defaults. Handlers receive them
+  through the new `ExtensionHandler::process_in_context` (provided: it calls `process`,
+  so existing handlers are unaffected), in a `HandlerContext`, and
+  `StaticContext::options()` (set with `StaticContext::with_options`).
+  - The first option is `dtd_border_policy` (`DtdBorderPolicy`): `Unsettled`, the default,
+    reads EDID 1.3 and warns as above; `Fixed(DtdBorderReading::Edid13 | Edid14)` applies
+    that reading to every Detailed Timing Descriptor (base block, CTA-861 extensions,
+    VTB-EXT, and CTA blocks inside DisplayID), records it in
+    `VideoMode::dtd_border_reading` (display-types 0.5), and emits no
+    `DtdBordersAmbiguous`. Under EDID 1.4 the line and frame totals include both borders,
+    so the refresh rate is lower, and `h_blank` is the blanking. `DtdBorderReading` is
+    re-exported. The declared EDID version is not evidence of the reading; its
+    documentation shows how to follow it anyway.
+- **DisplayID's image size in `DisplayIdCapabilities::image_size`** (display-types 0.5),
+  from the Display Parameters block (1.x `0x01`, 2.x `0x21`), as a `DisplayIdImageSize`
+  in the unit the block declares, so 2.x sizes in 0.1 mm keep their precision (they were
+  truncated to whole millimetres). `DisplayIdImageSize` and `ImageSizeUnit` are
+  re-exported.
+- **Block numbers for handlers.** `HandlerContext::block_number(i)` and
+  `StaticContext::block_number(i)` give the EDID block number of each block a handler
+  receives (0 for the base block, `n` for the `n`th block after it); both pipelines set
+  them. `HandlerContext` (`alloc`/`std`) also carries the options, has a public
+  constructor and `Default` (default options, no block numbers), and keeps its fields
+  private so it can grow without changing `ExtensionHandler`. `StaticContext` gains
+  `with_block_numbers`.
 
 ### Changed
 
@@ -59,13 +123,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **DisplayID 1.x image sizes were ten times too large.** Block `0x01` gives the size in
+  0.1 mm, as edid-decode and libdisplay-info read it; piaf took it as millimetres.
+  `doc/displayid-block-tags.md` also showed a 6-byte layout for the block; it is 12 bytes,
+  as decoded.
+- **`preferred_image_size_mm` was never set in bare `no_std` builds**, by either pipeline.
+- **A DTD repeating an earlier DTD's timing replaced its entry** in
+  `DisplayCapabilities::supported_modes`, so a CTA-861 extension DTD with the preferred
+  timing's resolution, refresh rate and scan type took over the base block's entry (its
+  timing detail and source). The first DTD declaration is now kept. A DTD still replaces a
+  mode from an established, standard or VIC source, which lacks its timing detail. The
+  static pipeline already kept the first.
+- **piaf did not build for bare-metal targets** (e.g. `thumbv7em-none-eabi`), with or
+  without `alloc`. Its `std` and `alloc` features did not reach its dependencies, so
+  display-types and thiserror were always built with `std`, and the `no_std` build only
+  compiled on targets that have it. Now `std` enables `alloc`, the features are forwarded
+  to display-types, and display-types and thiserror are taken without their default
+  features. Two places relied on the hidden `std`: the bare build imports
+  `DisplayCapabilities` from `display_types::capabilities` (display-types re-exports it
+  at its root only with `alloc`), and the HDR Static Metadata luminance (`50 ×
+  2^(cv/32)`) is computed from a table of `2^(k/32)` instead of `f32::exp2`, with the
+  same result for every code value.
 - **`capabilities_from_edid_static` dropped the base block's warnings in alloc builds**
   (bare `no_std` builds kept them): `DtdPixelClockOverflow`, the DTD border warnings and
   the rest now reach the static output in every build.
+- **`capabilities_from_edid_static` dropped the parser's warnings** (`SizeMismatch`,
+  `UnknownExtension`, `ExtensionBlockLimitReached`), which the dynamic pipeline keeps. They
+  now come first in the static output, ahead of the base block's and the handlers', and
+  `warnings_dropped()` includes the ones the parser could not store.
 - **Detailed Timing Blocks in a VESA Video Timing Block Extension** (CTA extended tag
   0x03) were decoded by a separate decoder that kept only the resolution, refresh rate
   and interlace flag. They now go through the same decoder as every other DTD, with the
   pixel clock, porches, sync, borders, stereo and `h_blank`, and its warnings.
+
+### Internal
+
+- **CI builds the `no_std` and `alloc`-only configurations for `thumbv7em-none-eabi`**,
+  in `ci.yml` and in the `verify` job of `publish.yml`, as the rest of the stack does. A
+  host build always has `std`, so it could not catch a dependency that needs it.
 
 ## [0.4.2] - 2026-10-18
 

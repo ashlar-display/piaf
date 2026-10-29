@@ -10,6 +10,7 @@ use super::{
 };
 use crate::capabilities::cea861::cea861_collection_into_sink;
 use crate::model::capabilities::ModeSink;
+use crate::model::options::DecodeOptions;
 use coded::{
     decode_cta_video_timing_block, decode_type_iv_block, decode_type_viii_block,
     decode_vesa_video_timing_block,
@@ -31,7 +32,12 @@ pub(crate) use detailed::decode_type_vii_descriptor_to_mode;
 /// `version` is the DisplayID version byte from the section header. V1 timing decoders
 /// run only when `version` falls in the 1.x range; V2 sections do not yet decode any
 /// timing blocks.
-pub(super) fn process_data_blocks(payload: &[u8], version: u8, sink: &mut dyn ModeSink) {
+pub(super) fn process_data_blocks(
+    payload: &[u8],
+    version: u8,
+    sink: &mut dyn ModeSink,
+    options: &DecodeOptions,
+) {
     let is_v2 = version == DISPLAYID_V2;
     for_each_data_block(payload, |tag, revision, block_payload| {
         if is_v2 {
@@ -63,7 +69,7 @@ pub(super) fn process_data_blocks(payload: &[u8], version: u8, sink: &mut dyn Mo
                     // CTA DisplayID Block — payload is a CTA-861 data block collection.
                     // Mode-producing entries (VICs, VTB-EXT, T7/T8/T10VTDB, Y420) are
                     // emitted; CTA metadata is dropped on the static path.
-                    cea861_collection_into_sink(block_payload, sink);
+                    cea861_collection_into_sink(block_payload, sink, options);
                 }
                 _ => {}
             }
@@ -177,7 +183,7 @@ mod tests {
         payload.extend_from_slice(&desc1);
         payload.extend_from_slice(&desc2);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, 0x10, &mut caps);
+        process_data_blocks(&payload, 0x10, &mut caps, &DecodeOptions::new());
         assert_eq!(caps.supported_modes.len(), 2);
         assert!(
             caps.supported_modes
@@ -196,7 +202,7 @@ mod tests {
         // A data block that claims a length extending past the payload boundary.
         let payload = [TAG_TYPE_I_TIMING, 0x00, 50]; // claims 50 bytes; 0 remain
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, 0x10, &mut caps);
+        process_data_blocks(&payload, 0x10, &mut caps, &DecodeOptions::new());
         assert!(caps.supported_modes.is_empty());
     }
 
@@ -211,7 +217,7 @@ mod tests {
         payload.extend_from_slice(&[TAG_TYPE_I_TIMING, 0x00, 20]);
         payload.extend_from_slice(&desc2);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, 0x10, &mut caps);
+        process_data_blocks(&payload, 0x10, &mut caps, &DecodeOptions::new());
         assert_eq!(caps.supported_modes.len(), 1);
         assert_eq!(caps.supported_modes[0].width, 1920);
     }
@@ -225,7 +231,7 @@ mod tests {
         payload.extend_from_slice(&[TAG_TYPE_I_TIMING, 0x00, 20]);
         payload.extend_from_slice(&desc);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, 0x10, &mut caps);
+        process_data_blocks(&payload, 0x10, &mut caps, &DecodeOptions::new());
         assert_eq!(caps.supported_modes.len(), 1);
         assert_eq!(caps.supported_modes[0].width, 1920);
     }
@@ -236,7 +242,7 @@ mod tests {
         let mut payload = vec![TAG_TYPE_II_TIMING, 0x00, 10];
         payload.extend_from_slice(&[0u8; 10]);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, 0x10, &mut caps);
+        process_data_blocks(&payload, 0x10, &mut caps, &DecodeOptions::new());
         assert!(caps.supported_modes.is_empty());
     }
 
@@ -251,7 +257,7 @@ mod tests {
         payload.extend_from_slice(&d);
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, 0x10, &mut ctx);
+        process_data_blocks(&payload, 0x10, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 1920);
@@ -283,7 +289,7 @@ mod tests {
         payload.extend_from_slice(&d);
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, 0x10, &mut ctx);
+        process_data_blocks(&payload, 0x10, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 1920);
@@ -298,7 +304,7 @@ mod tests {
         let payload = vec![TAG_TYPE_III_TIMING, 0x00, 3, byte0, 239, 59];
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, 0x10, &mut ctx);
+        process_data_blocks(&payload, 0x10, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 1920);
@@ -312,7 +318,7 @@ mod tests {
         let payload = vec![TAG_TYPE_IV_TIMING, 0x00, 1, 0x09];
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, 0x10, &mut ctx);
+        process_data_blocks(&payload, 0x10, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 800);
@@ -326,7 +332,7 @@ mod tests {
         let payload = vec![TAG_VESA_VIDEO_TIMING, 0x00, 2, 0x00, 0x01];
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, 0x10, &mut ctx);
+        process_data_blocks(&payload, 0x10, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 800);
@@ -340,7 +346,7 @@ mod tests {
         let payload = vec![TAG_CTA_VIDEO_TIMING, 0x00, 1, 0x01];
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, 0x10, &mut ctx);
+        process_data_blocks(&payload, 0x10, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         assert_eq!(caps.supported_modes[0].as_ref().unwrap().width, 640);
     }
@@ -357,7 +363,7 @@ mod tests {
         payload.push(0x00); // reserved
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, 0x10, &mut ctx);
+        process_data_blocks(&payload, 0x10, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 1920);
@@ -391,7 +397,7 @@ mod tests {
         let mut payload = vec![TAG_V2_TYPE_VII_TIMING, 0x00, 20];
         payload.extend_from_slice(&descriptor);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, DISPLAYID_V2, &mut caps);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut caps, &DecodeOptions::new());
         assert_eq!(caps.supported_modes.len(), 1);
         let mode = &caps.supported_modes[0];
         assert_eq!(mode.width, 1920);
@@ -417,7 +423,7 @@ mod tests {
         payload.extend_from_slice(&desc_1080p60);
         payload.extend_from_slice(&desc_720p60);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, DISPLAYID_V2, &mut caps);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut caps, &DecodeOptions::new());
         assert_eq!(caps.supported_modes.len(), 2);
         assert!(
             caps.supported_modes
@@ -438,7 +444,7 @@ mod tests {
         let mut payload = vec![TAG_V2_TYPE_VII_TIMING, 0x00, 20];
         payload.extend_from_slice(&descriptor);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, 0x10, &mut caps);
+        process_data_blocks(&payload, 0x10, &mut caps, &DecodeOptions::new());
         assert!(caps.supported_modes.is_empty());
     }
 
@@ -449,7 +455,7 @@ mod tests {
         let mut payload = vec![TAG_TYPE_I_TIMING, 0x00, 20];
         payload.extend_from_slice(&desc);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, DISPLAYID_V2, &mut caps);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut caps, &DecodeOptions::new());
         assert!(caps.supported_modes.is_empty());
     }
 
@@ -458,7 +464,7 @@ mod tests {
         // revision: code_type=DMT(0), TCS=0; payload [0x52] → 1920×1080@60.
         let payload = vec![TAG_V2_TYPE_VIII_TIMING, 0x00, 1, 0x52];
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, DISPLAYID_V2, &mut caps);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut caps, &DecodeOptions::new());
         assert_eq!(caps.supported_modes.len(), 1);
         assert_eq!(caps.supported_modes[0].width, 1920);
         assert_eq!(caps.supported_modes[0].height, 1080);
@@ -469,7 +475,7 @@ mod tests {
         // revision: code_type=DMT(0), TCS=1 (bit 3); payload [0x52, 0x00].
         let payload = vec![TAG_V2_TYPE_VIII_TIMING, 0x08, 2, 0x52, 0x00];
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, DISPLAYID_V2, &mut caps);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut caps, &DecodeOptions::new());
         assert_eq!(caps.supported_modes.len(), 1);
         assert_eq!(caps.supported_modes[0].width, 1920);
     }
@@ -478,7 +484,7 @@ mod tests {
     fn test_type_viii_not_decoded_on_v1_section() {
         let payload = vec![TAG_V2_TYPE_VIII_TIMING, 0x00, 1, 0x52];
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, 0x10, &mut caps);
+        process_data_blocks(&payload, 0x10, &mut caps, &DecodeOptions::new());
         assert!(caps.supported_modes.is_empty());
     }
 
@@ -487,7 +493,7 @@ mod tests {
         let payload = vec![TAG_V2_TYPE_VIII_TIMING, 0x40, 1, 0x01]; // VIC 1 = 640×480@60
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, DISPLAYID_V2, &mut ctx);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 640);
@@ -505,7 +511,7 @@ mod tests {
         d[5] = 59;
         payload.extend_from_slice(&d);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, DISPLAYID_V2, &mut caps);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut caps, &DecodeOptions::new());
         assert_eq!(caps.supported_modes.len(), 1);
         let mode = &caps.supported_modes[0];
         assert_eq!(mode.width, 1920);
@@ -523,7 +529,7 @@ mod tests {
         d[5] = 59;
         payload.extend_from_slice(&d);
         let mut caps = DisplayCapabilities::default();
-        process_data_blocks(&payload, 0x10, &mut caps);
+        process_data_blocks(&payload, 0x10, &mut caps, &DecodeOptions::new());
         assert!(caps.supported_modes.is_empty());
     }
 
@@ -538,7 +544,7 @@ mod tests {
         payload.extend_from_slice(&d);
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, DISPLAYID_V2, &mut ctx);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 1920);
@@ -553,7 +559,7 @@ mod tests {
         payload.extend_from_slice(&descriptor);
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, DISPLAYID_V2, &mut ctx);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 1920);
@@ -582,7 +588,7 @@ mod tests {
         payload.extend_from_slice(&descriptor);
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, 0x10, &mut ctx);
+        process_data_blocks(&payload, 0x10, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 1920);
@@ -603,7 +609,7 @@ mod tests {
 
         let mut caps = StaticDisplayCapabilities::<16>::default();
         let mut ctx = StaticContext::new(&mut caps);
-        process_data_blocks(&payload, DISPLAYID_V2, &mut ctx);
+        process_data_blocks(&payload, DISPLAYID_V2, &mut ctx, &DecodeOptions::new());
         assert_eq!(caps.num_modes, 1);
         let mode = caps.supported_modes[0].as_ref().unwrap();
         assert_eq!(mode.width, 640);

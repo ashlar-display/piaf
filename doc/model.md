@@ -15,26 +15,34 @@ including bare `no_std`, because they are borrowed rather than allocated.
 pub struct ParsedEdidRef<'a> {
     pub base_block: &'a [u8; 128],
     pub num_extensions: usize,
-    // alloc/std: pub warnings: Vec<ParseWarning>,
-    // no_std:    pub warnings: [Option<EdidWarning>; 8],
+    // warnings: private; see the accessors below
 }
 ```
 
-**`ParsedEdid`** — the owned output of `parse_edid_owned`. Copies block bytes out of the
-input so the result can outlive the input buffer.
+**`ParsedEdid`** (`alloc`/`std`) — the owned output of `parse_edid_owned`. Copies block bytes
+out of the input so the result can outlive the input buffer.
 
 ```rust
 pub struct ParsedEdid {
     pub base_block: [u8; 128],
-    // alloc/std only:
     pub extensions: Vec<[u8; 128]>,
-    pub warnings: Vec<ParseWarning>,
+    // warnings: private; see the accessors below
 }
 ```
 
-In bare `no_std` builds (no `alloc`), `ParsedEdid.extensions` and `ParsedEdid.warnings` are
-absent. Prefer `ParsedEdidRef` in bare `no_std` when extension block access is needed — it
-retains the borrowed extension bytes without requiring an allocator.
+Without `alloc` there is no owned form: keep the input buffer and use `ParsedEdidRef`, which
+borrows the extension blocks and needs no allocator.
+
+Both types offer the parse-phase warnings through the same accessors, in every build:
+
+```rust
+let all: &[EdidWarning] = parsed.warnings();
+for warn in parsed.iter_warnings() { /* &EdidWarning */ }
+let lost: u16 = parsed.warnings_dropped();
+```
+
+With `alloc` every warning is kept and `warnings_dropped()` is 0. Without it, `parse_edid`
+stores up to `MAX_PARSE_WARNINGS` (8) and counts the rest.
 
 Both structures are useful for:
 
@@ -121,8 +129,8 @@ extend beyond the 8-bit range.
 ### `StaticDisplayCapabilities<const MAX_MODES: usize>` (static pipeline, all tiers)
 
 The output type for `capabilities_from_edid_static`. Contains all the same scalar fields as
-`DisplayCapabilities` (same names, same types), plus fixed-capacity arrays for modes and
-warnings:
+`DisplayCapabilities` (same names, same types), plus a fixed-capacity array for modes and
+private, fixed-capacity warning storage:
 
 ```rust
 pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
@@ -130,19 +138,22 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     pub manufacturer: Option<ManufacturerId>,
     // ...
 
-    // Mode and warning storage
+    // Mode storage
     pub supported_modes: [Option<VideoMode>; MAX_MODES],
     pub num_modes: usize,
-    pub warnings: [Option<EdidWarning>; 8],
-    pub num_warnings: usize,
+
+    // Warning storage (private; see the accessors below)
 }
 ```
 
-Access modes and warnings through iterators rather than indexing directly:
+Access modes through the iterator rather than indexing directly; warnings are only
+reachable through accessors, which are the same in every build:
 
 ```rust
 for mode in caps.iter_modes() { /* &VideoMode */ }
 for warn in caps.iter_warnings() { /* &EdidWarning */ }
+let all: &[EdidWarning] = caps.warnings();
+let lost: u16 = caps.warnings_dropped(); // beyond MAX_STATIC_WARNINGS (8)
 ```
 
 ### `VideoMode` construction
@@ -167,8 +178,13 @@ All other fields (`pixel_clock_khz`, `h_front_porch`, `h_sync_width`, etc.) defa
 `None` / `0` when not set via `with_detailed_timing`. This matches the sparse data available from non-DTD sources
 such as SVDs and standard timing entries.
 
-Modes and warnings beyond capacity are silently dropped — matching the existing 8-warning cap
-philosophy. 64 is a reasonable default for `MAX_MODES`.
+`dtd_border_reading` is `Some` only when the caller settled the reading of a DTD's borders
+with `DtdBorderPolicy::Fixed`: the mode's refresh rate and `h_blank` follow that reading.
+`None` means it was not settled; for a DTD with borders, piaf then read EDID 1.3 and emitted
+`DtdBordersAmbiguous`, and a consumer may need to consider the 1.4 reading as well.
+
+Modes beyond capacity are silently dropped. Warnings beyond `MAX_STATIC_WARNINGS` are not
+stored but counted in `warnings_dropped()`. 64 is a reasonable default for `MAX_MODES`.
 
 `StaticDisplayCapabilities` does not have an `extension_data` field. Rich extension metadata
 (audio, VSDB, colorimetry, HDR) is only available through the dynamic pipeline.
@@ -293,8 +309,8 @@ without wrapping them in `EdidWarning`. The built-in library always emits `EdidW
 variants, but a third-party handler that detects a protocol-specific anomaly can emit its
 own type directly.
 
-Using `Arc` (rather than `Box`) keeps `ParseWarning` cloneable, which lets warnings be
-copied from `ParsedEdid` into `DisplayCapabilities` without consuming the parsed result.
+Using `Arc` (rather than `Box`) keeps `ParseWarning`, and so `DisplayCapabilities`,
+cloneable.
 
 To inspect a specific variant, use `downcast_ref` on the inner error:
 
@@ -306,7 +322,10 @@ for w in caps.iter_warnings() {
 }
 ```
 
-In bare `no_std` builds (without `alloc`) the warning list holds `EdidWarning` values
-directly (no type erasure), capped at 8 entries. The `iter_warnings()` method provides
-uniform access across both configurations.
+The parser's warnings (`ParsedEdidRef`, `ParsedEdid`) and those of
+`StaticDisplayCapabilities` are `EdidWarning` values directly, in every build, so no downcast
+is needed. Their storage is private and fixed-capacity where there is no allocator:
+`parse_edid` stores up to `MAX_PARSE_WARNINGS` (8) without `alloc`, and
+`StaticDisplayCapabilities` up to `MAX_STATIC_WARNINGS` (8) in every build. Each counts the
+rest in `warnings_dropped()`; the static pipeline's count includes the parser's.
 
