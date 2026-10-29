@@ -2,6 +2,7 @@ use crate::capabilities::base::timings::build_dtd_mode;
 use crate::capabilities::displayid::decode_type_vii_descriptor_to_mode;
 use crate::model::capabilities::VideoMode;
 use crate::model::diagnostics::EdidWarning;
+use crate::model::options::DecodeOptions;
 use crate::model::prelude::Vec;
 pub use display_types::cea861::colorimetry::{ColorimetryBlock, ColorimetryFlags};
 pub use display_types::cea861::hdmi_forum::{
@@ -121,9 +122,49 @@ pub(super) fn parse_colorimetry(block_data: &[u8]) -> Option<ColorimetryBlock> {
 // HDR Static Metadata Data Block (extended tag 0x06)
 // ---------------------------------------------------------------------------
 
+/// `2^(k/32)` for `k` in `0..32`, rounded to `f32` (`k = 16` is √2).
+const EXP2_32NDS: [f32; 32] = [
+    1.0,
+    1.0218972,
+    1.0442737,
+    1.0671405,
+    1.0905077,
+    1.1143868,
+    1.1387886,
+    1.1637249,
+    1.1892071,
+    1.2152474,
+    1.2418578,
+    1.269051,
+    1.2968396,
+    1.3252367,
+    1.3542556,
+    1.38391,
+    core::f32::consts::SQRT_2,
+    1.4451808,
+    1.4768262,
+    1.5091645,
+    1.5422108,
+    1.5759809,
+    1.6104903,
+    1.6457555,
+    1.6817929,
+    1.7186193,
+    1.7562522,
+    1.7947091,
+    1.8340081,
+    1.8741677,
+    1.9152066,
+    1.9571441,
+];
+
 /// Decodes the `50 × 2^(raw/32)` luminance encoding used in the HDR block.
+///
+/// `2^(raw/32)` is `2^(raw >> 5)`, exact in `f32`, times a table entry: `core` has no
+/// `exp2` without `std`.
 fn decode_luminance(raw: u8) -> f32 {
-    50.0 * (raw as f32 / 32.0).exp2()
+    let whole = f32::from(1u8 << (raw >> 5));
+    50.0 * EXP2_32NDS[usize::from(raw & 31)] * whole
 }
 
 pub(super) fn parse_hdr_static_metadata(block_data: &[u8]) -> Option<HdrStaticMetadata> {
@@ -133,9 +174,10 @@ pub(super) fn parse_hdr_static_metadata(block_data: &[u8]) -> Option<HdrStaticMe
 
     let max_luminance = block_data.get(3).map(|&b| decode_luminance(b));
     let max_fall = block_data.get(4).map(|&b| decode_luminance(b));
-    let min_luminance = block_data
-        .get(5)
-        .and_then(|&b| max_luminance.map(|max| max * (b as f32 / 255.0).powi(2) / 100.0));
+    let min_luminance = block_data.get(5).and_then(|&b| {
+        let ratio = b as f32 / 255.0;
+        max_luminance.map(|max| max * (ratio * ratio) / 100.0)
+    });
 
     Some(HdrStaticMetadata::new(
         eotf,
@@ -850,6 +892,7 @@ pub(super) fn parse_vesa_display_device(block_data: &[u8]) -> Option<VesaDisplay
 /// The Detailed Timing Blocks are decoded like any other DTD; their warnings go to `warn`.
 pub(super) fn parse_vtb_ext(
     block_data: &[u8],
+    options: &DecodeOptions,
     warn: &mut dyn FnMut(EdidWarning),
 ) -> Option<VtbExtBlock> {
     // Payload layout (after the extended tag byte):
@@ -876,7 +919,7 @@ pub(super) fn parse_vtb_ext(
 
     // Detailed Timing Blocks (18 bytes each)
     for i in 0..w {
-        match build_dtd_mode(&data[i * 18..(i + 1) * 18], warn) {
+        match build_dtd_mode(&data[i * 18..(i + 1) * 18], options.dtd_border_policy, warn) {
             Ok(Some(mode)) if !timings.contains(&mode) => timings.push(mode),
             Ok(_) => {}
             Err(w) => warn(w),
@@ -1001,6 +1044,16 @@ mod tests {
         assert!((max - 400.0).abs() < 0.1, "max={max}");
         let min = hdr.min_luminance.unwrap();
         assert!(min > 0.9 && min < 1.1, "min={min}");
+    }
+
+    // The table gives what `std`'s `exp2` gave, for every code.
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_hdr_luminance_matches_exp2() {
+        for raw in 0..=u8::MAX {
+            let expected = 50.0 * (f32::from(raw) / 32.0).exp2();
+            assert_eq!(decode_luminance(raw), expected, "raw={raw}");
+        }
     }
 
     #[test]
@@ -1385,7 +1438,7 @@ mod tests {
     fn test_vtb_ext_empty_version_only() {
         // version=1, 0 DTBs, 0 CVTs, 0 STs
         let data = [0x01u8, 0x00, 0x00, 0x00];
-        let vtb = parse_vtb_ext(&data, &mut |_| {}).unwrap();
+        let vtb = parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).unwrap();
         assert_eq!(vtb.version, 1);
         assert!(vtb.timings.is_empty());
     }
@@ -1393,7 +1446,7 @@ mod tests {
     #[test]
     fn test_vtb_ext_too_short_returns_none() {
         let data = [0x01u8, 0x00, 0x00];
-        assert!(parse_vtb_ext(&data, &mut |_| {}).is_none());
+        assert!(parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).is_none());
     }
 
     /// A VTB-EXT payload with one Detailed Timing Block: 1920×1080, 148.50 MHz, blanking
@@ -1413,7 +1466,12 @@ mod tests {
     fn test_vtb_ext_dtb_keeps_detailed_timing() {
         // The DTBs used a decoder of their own that dropped everything but the identity.
         let mut warnings = Vec::new();
-        let vtb = parse_vtb_ext(&vtb_ext_with_1080p_dtb(0), &mut |w| warnings.push(w)).unwrap();
+        let vtb = parse_vtb_ext(
+            &vtb_ext_with_1080p_dtb(0),
+            &DecodeOptions::new(),
+            &mut |w| warnings.push(w),
+        )
+        .unwrap();
         let m = &vtb.timings[0];
         assert_eq!((m.width, m.height), (1920, 1080));
         assert_eq!(m.refresh_rate, Some(RefreshRate::integral(60)));
@@ -1427,7 +1485,12 @@ mod tests {
     #[test]
     fn test_vtb_ext_dtb_border_warning_reaches_caller() {
         let mut warnings = Vec::new();
-        let vtb = parse_vtb_ext(&vtb_ext_with_1080p_dtb(4), &mut |w| warnings.push(w)).unwrap();
+        let vtb = parse_vtb_ext(
+            &vtb_ext_with_1080p_dtb(4),
+            &DecodeOptions::new(),
+            &mut |w| warnings.push(w),
+        )
+        .unwrap();
         assert_eq!(vtb.timings[0].h_blank, Some(272));
         assert_eq!(
             warnings,
@@ -1443,7 +1506,7 @@ mod tests {
         // version=1, 0 DTBs, 0 CVTs, 1 ST
         // width=1280: (b1+31)*8=1280 → b1=129=0x81; b2=0x00 → 16:10 ratio, rate=60+0=60
         let data = [0x01u8, 0x00, 0x00, 0x01, 0x81, 0x00];
-        let vtb = parse_vtb_ext(&data, &mut |_| {}).unwrap();
+        let vtb = parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).unwrap();
         assert_eq!(vtb.timings.len(), 1);
         assert_eq!(vtb.timings[0].width, 1280);
         assert_eq!(vtb.timings[0].height, 800); // 1280 * 10 / 16 = 800
@@ -1457,7 +1520,7 @@ mod tests {
         //   b0 = 0x1B, b1 = (0x20) | aspect_16_9=(0x01<<2) = 0x24
         //   b2: 60Hz bit set = 0x08
         let data = [0x01u8, 0x00, 0x01, 0x00, 0x1B, 0x24, 0x08];
-        let vtb = parse_vtb_ext(&data, &mut |_| {}).unwrap();
+        let vtb = parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).unwrap();
         assert!(!vtb.timings.is_empty());
         let t = vtb
             .timings
@@ -1473,7 +1536,7 @@ mod tests {
     fn test_vtb_ext_insufficient_data_for_dtb_returns_none() {
         // version=1, 1 DTB, 0 CVTs, 0 STs — but only 4 bytes, no room for 18-byte DTB
         let data = [0x01u8, 0x01, 0x00, 0x00];
-        assert!(parse_vtb_ext(&data, &mut |_| {}).is_none());
+        assert!(parse_vtb_ext(&data, &DecodeOptions::new(), &mut |_| {}).is_none());
     }
 
     // --- Vendor-Specific Video / Audio Data Block tests ---

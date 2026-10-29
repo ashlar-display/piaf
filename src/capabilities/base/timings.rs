@@ -2,6 +2,7 @@ use crate::model::capabilities::{
     DisplayCapabilities, ModeSink, ModeSource, StereoMode, SyncDefinition, VideoMode,
 };
 use crate::model::diagnostics::EdidWarning;
+use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
 
 /// Decodes the established timings bitmap (bytes 0x23–0x25, 17 predefined modes).
 ///
@@ -67,15 +68,18 @@ pub(super) fn decode_standard_timings(base: &[u8; 128], sink: &mut dyn ModeSink)
 
 /// Parses a single 18-byte DTD slice into a `VideoMode`.
 ///
+/// The blanking is read with respect to the borders as `policy` says.
+///
 /// Non-fatal findings about a decoded mode ([`EdidWarning::DtdBordersAmbiguous`],
 /// [`EdidWarning::DtdBlankingInconsistent`]) go to `warn`; the mode is still returned.
 ///
 /// Returns:
 /// - `Ok(None)` — monitor descriptor (zero pixel clock) or undecodable geometry
-/// - `Ok(Some(mode))` — valid timing; does **not** populate `preferred_image_size_mm`
+/// - `Ok(Some(mode))` — valid timing
 /// - `Err(w)` — [`EdidWarning::DtdSlotTooShort`] or [`EdidWarning::DtdPixelClockOverflow`]
 pub(crate) fn build_dtd_mode(
     dtd: &[u8],
+    policy: DtdBorderPolicy,
     warn: &mut dyn FnMut(EdidWarning),
 ) -> Result<Option<VideoMode>, EdidWarning> {
     if dtd.len() < 18 {
@@ -97,7 +101,24 @@ pub(crate) fn build_dtd_mode(
     if hactive == 0 || vactive == 0 || hblank == 0 || vblank == 0 {
         return Ok(None);
     }
-    let total_pixels = (hactive + hblank) as u32 * (vactive + vblank) as u32;
+
+    // Border (bytes 15–16): pixels/lines on each side of the active area.
+    let h_border = dtd[15];
+    let v_border = dtd[16];
+
+    // EDID 1.3 §3.12 counts the borders in the blanking, EDID 1.4 §3.12 does not. Unless the
+    // caller settled it, piaf reads 1.3, as EDIDs in practice do (warned below).
+    let reading = match policy {
+        DtdBorderPolicy::Unsettled => DtdBorderReading::Edid13,
+        DtdBorderPolicy::Fixed(reading) => reading,
+    };
+    // The borders on top of the blanking in each total: none under 1.3.
+    let (h_borders, v_borders) = match reading {
+        DtdBorderReading::Edid13 => (0, 0),
+        DtdBorderReading::Edid14 => (2 * u32::from(h_border), 2 * u32::from(v_border)),
+    };
+    let total_pixels = (u32::from(hactive) + u32::from(hblank) + h_borders)
+        * (u32::from(vactive) + u32::from(vblank) + v_borders);
     if total_pixels == 0 {
         return Ok(None);
     }
@@ -117,21 +138,18 @@ pub(crate) fn build_dtd_mode(
     let v_front_porch = ((((dtd[11] as u16) >> 2) & 0x03) << 4) | (((dtd[10] as u16) >> 4) & 0x0F);
     let v_sync_width = (((dtd[11] as u16) & 0x03) << 4) | ((dtd[10] as u16) & 0x0F);
 
-    // Border (bytes 15–16): pixels/lines on each side of the active area.
-    let h_border = dtd[15];
-    let v_border = dtd[16];
-
-    // EDID 1.3 §3.12 counts the borders in the blanking, EDID 1.4 §3.12 does not; EDIDs in
-    // practice follow 1.3, and so does the refresh rate above (line total = active +
-    // blanking). `VideoMode::h_blank` excludes the borders, so both come off. What is left
-    // must still hold the front porch and the sync pulse; when it does not, the 1.3
-    // reading is impossible and `h_blank` is not guessed.
-    if h_border != 0 || v_border != 0 {
+    // An unsettled reading is an assumption when there are borders: say so.
+    if policy == DtdBorderPolicy::Unsettled && (h_border != 0 || v_border != 0) {
         warn(EdidWarning::DtdBordersAmbiguous { h_border, v_border });
     }
-    let h_blank = hblank
-        .checked_sub(2 * u16::from(h_border))
-        .filter(|&b| b >= h_front_porch + h_sync_width);
+    // `VideoMode::h_blank` excludes the borders: under 1.3 both come off the blanking,
+    // under 1.4 it is the blanking. It must still hold the front porch and the sync pulse;
+    // when it does not, the reading is impossible and `h_blank` is not guessed.
+    let h_blank = match reading {
+        DtdBorderReading::Edid13 => hblank.checked_sub(2 * u16::from(h_border)),
+        DtdBorderReading::Edid14 => Some(hblank),
+    }
+    .filter(|&b| b >= h_front_porch + h_sync_width);
     if h_blank.is_none() {
         warn(EdidWarning::DtdBlankingInconsistent {
             blanking: hblank,
@@ -193,49 +211,60 @@ pub(crate) fn build_dtd_mode(
         stereo,
         sync,
     );
-    Ok(Some(match h_blank {
+    let mode = match h_blank {
         Some(h_blank) => mode.with_h_blank(h_blank),
         None => mode,
+    };
+    Ok(Some(match policy {
+        DtdBorderPolicy::Unsettled => mode,
+        DtdBorderPolicy::Fixed(reading) => mode.with_dtd_border_reading(reading),
     }))
 }
 
 /// Decodes a single 18-byte Detailed Timing Descriptor slice into [`DisplayCapabilities`].
 ///
 /// Returns without modifying `caps` if the slot is a monitor descriptor (zero pixel clock)
-/// or contains invalid geometry. If the mode already exists in `caps.supported_modes` it is
-/// upgraded in place (preserving sync timing that may have been missing from an earlier source);
-/// otherwise it is appended.
+/// or contains invalid geometry. If a mode with the same width, height, refresh rate and
+/// scan type came from another kind of source (which lacks the DTD's timing detail), it is
+/// upgraded in place; if it came from an earlier DTD, that declaration is kept; otherwise
+/// the mode is appended.
+///
+/// The mode's source is `Dtd { block, index }`; without a `block` (the caller does not know
+/// where the descriptor sits) the mode has no source.
 ///
 /// This is `pub(crate)` so that the CEA-861 handler can reuse it for DTDs in extension blocks.
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub(crate) fn decode_dtd_slot(dtd: &[u8], caps: &mut DisplayCapabilities, dtd_index: u8) {
-    let mode = match build_dtd_mode(dtd, &mut |w| caps.push_warning(w)) {
+pub(crate) fn decode_dtd_slot(
+    dtd: &[u8],
+    caps: &mut DisplayCapabilities,
+    block: Option<u8>,
+    dtd_index: u8,
+    options: &DecodeOptions,
+) {
+    let mode = match build_dtd_mode(dtd, options.dtd_border_policy, &mut |w| {
+        caps.push_warning(w)
+    }) {
         Err(w) => {
             caps.push_warning(w);
             return;
         }
         Ok(None) => return,
-        Ok(Some(m)) => m.with_source(ModeSource::DtdIndex(dtd_index)),
+        Ok(Some(m)) => with_dtd_source(m, block, dtd_index),
     };
 
-    // Physical image area in mm: 12-bit H from byte 12 + upper nibble of byte 14,
-    // 12-bit V from byte 13 + lower nibble of byte 14. Both zero = undefined.
-    // `build_dtd_mode` guarantees dtd.len() >= 18.
-    let h_mm = (((dtd[14] as u16) & 0xF0) << 4) | (dtd[12] as u16);
-    let v_mm = (((dtd[14] as u16) & 0x0F) << 8) | (dtd[13] as u16);
-    if h_mm != 0 && v_mm != 0 && caps.preferred_image_size_mm.is_none() {
-        caps.preferred_image_size_mm = Some((h_mm, v_mm));
-    }
-
     // If a mode with matching identity (w/h/rate/interlaced) was already added from a
-    // non-DTD source (which has zero sync fields), upgrade it in place. Otherwise append.
+    // non-DTD source (which has zero sync fields), upgrade it in place. An earlier DTD's
+    // declaration is kept, so an extension DTD repeating the preferred timing does not take
+    // over its entry. Otherwise append.
     if let Some(existing) = caps.supported_modes.iter_mut().find(|m| {
         m.width == mode.width
             && m.height == mode.height
             && m.refresh_rate == mode.refresh_rate
             && m.interlaced == mode.interlaced
     }) {
-        *existing = mode;
+        if !matches!(existing.source, Some(ModeSource::Dtd { .. })) {
+            *existing = mode;
+        }
     } else {
         caps.supported_modes.push(mode);
     }
@@ -244,28 +273,64 @@ pub(crate) fn decode_dtd_slot(dtd: &[u8], caps: &mut DisplayCapabilities, dtd_in
 /// Decodes a single 18-byte Detailed Timing Descriptor slice into a [`ModeSink`].
 ///
 /// Like [`decode_dtd_slot`] but writes into any [`ModeSink`] rather than directly into
-/// [`DisplayCapabilities`]. The `preferred_image_size_mm` field is not populated — that
-/// is a base-block concern handled by [`decode_dtd_slot`].
+/// [`DisplayCapabilities`].
 ///
 /// This is `pub(crate)` so that the CEA-861 handler can use it for DTDs in extension blocks
 /// in no-alloc builds.
-pub(crate) fn decode_dtd_slot_into_sink(dtd: &[u8], sink: &mut dyn ModeSink, dtd_index: u8) {
-    match build_dtd_mode(dtd, &mut |w| sink.push_warning(w)) {
+pub(crate) fn decode_dtd_slot_into_sink(
+    dtd: &[u8],
+    sink: &mut dyn ModeSink,
+    block: Option<u8>,
+    dtd_index: u8,
+    options: &DecodeOptions,
+) {
+    match build_dtd_mode(dtd, options.dtd_border_policy, &mut |w| {
+        sink.push_warning(w)
+    }) {
         Err(w) => sink.push_warning(w),
         Ok(None) => {}
-        Ok(Some(mode)) => sink.push_mode(mode.with_source(ModeSource::DtdIndex(dtd_index))),
+        Ok(Some(mode)) => sink.push_mode(with_dtd_source(mode, block, dtd_index)),
     }
+}
+
+/// Sets `mode`'s source to `Dtd { block, index }`, or leaves it unset without a `block`.
+fn with_dtd_source(mode: VideoMode, block: Option<u8>, index: u8) -> VideoMode {
+    match block {
+        Some(block) => mode.with_source(ModeSource::Dtd { block, index }),
+        None => mode,
+    }
+}
+
+/// The image size of the preferred timing, in mm: the size in the base block's first
+/// Detailed Timing Descriptor (slot `0x36`), which EDID defines as the preferred timing.
+///
+/// `None` when the slot holds a display descriptor (zero pixel clock) rather than a timing,
+/// or when either axis is 0 (undefined).
+pub(super) fn preferred_image_size_mm(base: &[u8; 128]) -> Option<(u16, u16)> {
+    let dtd = &base[0x36..0x48];
+    if dtd[0] == 0 && dtd[1] == 0 {
+        return None;
+    }
+    // 12-bit H from byte 12 + upper nibble of byte 14, 12-bit V from byte 13 + lower
+    // nibble of byte 14.
+    let h_mm = (((dtd[14] as u16) & 0xF0) << 4) | (dtd[12] as u16);
+    let v_mm = (((dtd[14] as u16) & 0x0F) << 8) | (dtd[13] as u16);
+    (h_mm != 0 && v_mm != 0).then_some((h_mm, v_mm))
 }
 
 /// Decodes the four detailed timing descriptor (DTD) slots (offsets 0x36, 0x48, 0x5A, 0x6C).
 /// Slots with a zero pixel clock are monitor descriptors and are skipped here.
 // Called by capabilities_from_edid_static (step 6). The alloc BaseBlockHandler uses
-// decode_dtd_slot directly to preserve preferred_image_size_mm and upgrade-in-place semantics.
+// decode_dtd_slot directly to preserve upgrade-in-place semantics.
 #[allow(dead_code)]
-pub(super) fn decode_detailed_timings(base: &[u8; 128], sink: &mut dyn ModeSink) {
+pub(super) fn decode_detailed_timings(
+    base: &[u8; 128],
+    sink: &mut dyn ModeSink,
+    options: &DecodeOptions,
+) {
     for i in 0..4u8 {
         let offset = 0x36 + (i as usize * 18);
-        decode_dtd_slot_into_sink(&base[offset..offset + 18], sink, i);
+        decode_dtd_slot_into_sink(&base[offset..offset + 18], sink, Some(0), i, options);
     }
 }
 
@@ -276,6 +341,7 @@ mod tests {
     use crate::model::capabilities::{DisplayCapabilities, RefreshRate, VideoMode};
     use crate::model::diagnostics::EdidWarning;
     use crate::model::extension::ExtensionHandler;
+    use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
     use crate::model::prelude::Vec;
 
     #[test]
@@ -585,6 +651,34 @@ mod tests {
         caps
     }
 
+    /// `base_with_bordered_1080p(0, 0)` with the same timing in slot 1, sized 600 × 340 mm.
+    fn base_with_sized_second_dtd() -> [u8; 128] {
+        let mut base = base_with_bordered_1080p(0, 0);
+        base.copy_within(0x36..0x48, 0x48);
+        base[0x48 + 12..0x48 + 15].copy_from_slice(&[0x58, 0x54, 0x21]);
+        base
+    }
+
+    #[test]
+    fn test_image_size_comes_from_the_preferred_timing_only() {
+        // Slot 0 gives no size: another slot's size does not stand in for it.
+        let mut base = base_with_sized_second_dtd();
+        assert_eq!(decode_base(&base).preferred_image_size_mm, None);
+
+        base[0x36 + 12..0x36 + 15].copy_from_slice(&[0x0F, 0x28, 0x21]); // 527 × 296 mm
+        assert_eq!(decode_base(&base).preferred_image_size_mm, Some((527, 296)));
+    }
+
+    #[test]
+    fn test_image_size_none_when_first_slot_is_a_display_descriptor() {
+        let mut base = base_with_sized_second_dtd();
+        // A display product name descriptor, whose text falls where a DTD's size would be.
+        base[0x36..0x48].fill(0);
+        base[0x39] = 0xFC;
+        base[0x3B..0x48].copy_from_slice(b"Pinball DMD\n ");
+        assert_eq!(decode_base(&base).preferred_image_size_mm, None);
+    }
+
     fn borders_warnings(caps: &DisplayCapabilities) -> Vec<EdidWarning> {
         caps.iter_warnings()
             .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
@@ -608,6 +702,8 @@ mod tests {
         assert_eq!(mode.h_border, 8);
         // The refresh rate takes the same reading: 148.5 MHz / (2200 × 1125) = 60 Hz.
         assert_eq!(mode.refresh_rate, Some(RefreshRate::integral(60)));
+        // An assumption, not a settled reading.
+        assert_eq!(mode.dtd_border_reading, None);
         assert_eq!(
             borders_warnings(&caps),
             [EdidWarning::DtdBordersAmbiguous {
@@ -681,7 +777,13 @@ mod tests {
         }
         let base = base_with_bordered_1080p(80, 2); // ambiguous, and 280 − 160 < 132
         let mut sink = Collect::default();
-        super::decode_dtd_slot_into_sink(&base[0x36..0x48], &mut sink, 0);
+        super::decode_dtd_slot_into_sink(
+            &base[0x36..0x48],
+            &mut sink,
+            Some(0),
+            0,
+            &DecodeOptions::new(),
+        );
         assert_eq!(sink.1.len(), 1);
         assert_eq!(sink.1[0].h_blank, None);
         assert!(matches!(
@@ -691,6 +793,83 @@ mod tests {
                 EdidWarning::DtdBlankingInconsistent { .. }
             ]
         ));
+    }
+
+    /// Decodes the DTD of `base_with_bordered_1080p` under `policy`.
+    fn decode_dtd(base: &[u8; 128], policy: DtdBorderPolicy) -> (VideoMode, Vec<EdidWarning>) {
+        let mut warnings = Vec::new();
+        let mode = super::build_dtd_mode(&base[0x36..0x48], policy, &mut |w| warnings.push(w))
+            .unwrap()
+            .unwrap();
+        (mode, warnings)
+    }
+
+    #[test]
+    fn test_dtd_fixed_edid_1_4_puts_borders_outside_the_blanking() {
+        let policy = DtdBorderPolicy::Fixed(DtdBorderReading::Edid14);
+        let (mode, warnings) = decode_dtd(&base_with_bordered_1080p(8, 2), policy);
+        // The 280 of blanking exclude the borders.
+        assert_eq!(mode.h_blank, Some(280));
+        // 148.5 MHz / ((1920 + 280 + 16) × (1080 + 45 + 4)) = 59.35 Hz, in whole hertz.
+        assert_eq!(mode.refresh_rate, Some(RefreshRate::integral(59)));
+        assert_eq!(mode.dtd_border_reading, Some(DtdBorderReading::Edid14));
+        // Settled, so not ambiguous.
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_dtd_fixed_edid_1_3_matches_unsettled_without_the_warning() {
+        let base = base_with_bordered_1080p(8, 2);
+        let (fixed, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(DtdBorderReading::Edid13));
+        let (unsettled, _) = decode_dtd(&base, DtdBorderPolicy::Unsettled);
+        assert_eq!(fixed.h_blank, Some(264));
+        assert_eq!(fixed.dtd_border_reading, Some(DtdBorderReading::Edid13));
+        assert_eq!(
+            fixed,
+            unsettled.with_dtd_border_reading(DtdBorderReading::Edid13)
+        );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_dtd_fixed_edid_1_4_fits_where_edid_1_3_cannot() {
+        // 2 × 150 > 280 under 1.3; under 1.4 the blanking holds porch 88 and sync 44.
+        let base = base_with_bordered_1080p(150, 0);
+        let (mode, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        assert_eq!(mode.h_blank, Some(280));
+        assert!(warnings.is_empty());
+
+        let (mode, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(DtdBorderReading::Edid13));
+        assert_eq!(mode.h_blank, None);
+        assert!(matches!(
+            warnings[..],
+            [EdidWarning::DtdBlankingInconsistent { .. }]
+        ));
+    }
+
+    #[test]
+    fn test_dtd_fixed_edid_1_4_still_checks_porch_and_sync() {
+        // Front porch 200 + sync 100 do not fit a blanking of 280 under either reading.
+        let mut base = base_with_bordered_1080p(8, 0);
+        base[0x3E] = 200;
+        base[0x3F] = 100;
+        let (mode, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        assert_eq!(mode.h_blank, None);
+        assert!(matches!(
+            warnings[..],
+            [EdidWarning::DtdBlankingInconsistent { blanking: 280, .. }]
+        ));
+    }
+
+    #[test]
+    fn test_dtd_without_borders_is_the_same_under_every_policy() {
+        let base = base_with_bordered_1080p(0, 0);
+        let (unsettled, _) = decode_dtd(&base, DtdBorderPolicy::Unsettled);
+        for reading in [DtdBorderReading::Edid13, DtdBorderReading::Edid14] {
+            let (fixed, warnings) = decode_dtd(&base, DtdBorderPolicy::Fixed(reading));
+            assert_eq!(fixed, unsettled.clone().with_dtd_border_reading(reading));
+            assert!(warnings.is_empty());
+        }
     }
 
     #[test]

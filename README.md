@@ -165,6 +165,36 @@ let caps: StaticDisplayCapabilities<64> =
 Static handlers extract modes only — audio, VSDB, colorimetry, and similar rich metadata
 require the dynamic pipeline.
 
+## Decode options
+
+Where EDID data allows more than one reading, piaf takes the one EDIDs follow in practice
+and warns. `DecodeOptions` lets the caller settle the reading instead; both pipelines take
+them, through `capabilities_from_edid_with_options` and
+`capabilities_from_edid_static_with_options`, and apply them to every block of the EDID.
+
+The first option is the reading of a Detailed Timing Descriptor's borders. EDID 1.3 counts
+them in the blanking, EDID 1.4 does not, which changes the refresh rate and `h_blank` of a
+DTD with borders. By default piaf reads 1.3 and emits `DtdBordersAmbiguous`;
+`DtdBorderPolicy::Fixed` applies the given reading, records it in
+`VideoMode::dtd_border_reading` and drops the warning:
+
+```rust
+use piaf::{
+    capabilities_from_edid_with_options, parse_edid, DecodeOptions, DtdBorderPolicy,
+    DtdBorderReading, ExtensionLibrary,
+};
+
+let library = ExtensionLibrary::with_standard_handlers();
+let parsed = parse_edid(&bytes, &library)?;
+let options = DecodeOptions::new()
+    .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+let caps = capabilities_from_edid_with_options(&parsed, &library, options);
+```
+
+EDIDs in practice use the 1.3 reading whatever version they declare, so the declared
+version is not evidence of it. To follow it anyway, read it from the base block and set
+`Fixed`; the `DtdBorderPolicy` documentation shows how.
+
 ## Features
 
 | Feature | Default | Description                                              |
@@ -262,7 +292,7 @@ Fields decoded by `BaseBlockHandler`:
 | Established timings I/II    | bytes `0x23`–`0x25`                  | Bitmap of 17 legacy modes decoded as `VideoMode` entries                                             |
 | Established timings III     | descriptor `0xF7`                    | Extended bitmap of 44 additional VESA modes                                                          |
 | Standard timings            | bytes `0x26`–`0x35`                  | Up to 8 resolution + refresh rate pairs decoded as `VideoMode` entries                               |
-| Detailed timing descriptors | slots `0x36`, `0x48`, `0x5A`, `0x6C` | Full DTD parameters decoded as `VideoMode`; first non-zero image size sets `preferred_image_size_mm` |
+| Detailed timing descriptors | slots `0x36`, `0x48`, `0x5A`, `0x6C` | Full DTD parameters decoded as `VideoMode`; DTD 0's image size sets `preferred_image_size_mm`        |
 | Monitor name                | descriptor `0xFC`                    | Display name string                                                                                  |
 | Serial number string        | descriptor `0xFF`                    | Serial number as text                                                                                |
 | Unspecified text            | descriptor `0xFE`                    | Manufacturer-defined ASCII string                                                                    |
@@ -309,7 +339,7 @@ Data blocks decoded by `DisplayIdHandler` (extension tag `0x70`):
 | Tag    | Block                        | Output                                                                                                                                                                                                                                                                                    |
 |--------|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `0x00` | Product Identification       | `manufacturer`, `product_code`, `display_name`, `serial_number_string`, `manufacture_date` on `DisplayCapabilities`                                                                                                                                                                       |
-| `0x01` | Display Parameters           | `preferred_image_size_mm`, `native_pixels` on `DisplayCapabilities`                                                                                                                                                                                                                       |
+| `0x01` | Display Parameters           | `image_size` (0.1 mm) on `DisplayIdCapabilities`; `native_pixels` on `DisplayCapabilities`                                                                                                                                                                                                |
 | `0x02` | Color Characteristics        | `chromaticity` on `DisplayCapabilities`                                                                                                                                                                                                                                                   |
 | `0x03` | Type I Detailed Timings      | `supported_modes` (20-byte descriptors)                                                                                                                                                                                                                                                   |
 | `0x04` | Type II Detailed Timings     | `supported_modes` (10-byte descriptors)                                                                                                                                                                                                                                                   |
@@ -341,7 +371,7 @@ DisplayID 2.x sections (version byte `0x20`) use a disjoint tag space at `0x20`�
 | Tag    | Block                              | Output                                                                                                                         |
 |--------|------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | `0x20` | Product Identification             | `manufacturer_oui` (on `DisplayIdCapabilities`); `product_code`, `serial_number`, `manufacture_date`, `display_name` on `DisplayCapabilities` |
-| `0x21` | Display Parameters                 | `display_params_v2` (chromaticity, luminance, gamma, display technology, scan orientation, audio routing); `preferred_image_size_mm`, `native_pixels`, `color_bit_depth` mirrored on `DisplayCapabilities` |
+| `0x21` | Display Parameters                 | `display_params_v2` (chromaticity, luminance, gamma, display technology, scan orientation, audio routing), `image_size` (0.1 or 1 mm) on `DisplayIdCapabilities`; `native_pixels`, `color_bit_depth` mirrored on `DisplayCapabilities` |
 | `0x22` | Type VII Detailed Timing           | `supported_modes` (20-byte descriptors with 24-bit pixel clock)                                                                |
 | `0x23` | Type VIII Enumerated Timing Code   | `supported_modes` via DMT/VIC/HDMI VIC lookup                                                                                  |
 | `0x24` | Type IX Formula-Based Timing       | `supported_modes` with `cvt_algorithm` (CVT-RB1/RB2/RB3, RB-with-CVT-RB1/RB2) and `y420` flag from byte 0; **CVT-RB v1, v2, and v3** fully expanded to `pixel_clock_khz` + blanking via `display_types::compute_type_ix_timing` (RB-with-CVT-RB1/RB2 variants pending) |

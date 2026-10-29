@@ -47,7 +47,7 @@ pub enum EdidWarning {
     #[error("DTD slot skipped: pixel clock overflow during refresh rate calculation")]
     DtdPixelClockOverflow,
     /// A Detailed Timing Descriptor has non-zero borders, which EDID versions read
-    /// differently. The mode is kept.
+    /// differently, and the caller did not settle the reading. The mode is kept.
     ///
     /// EDID 1.3 §3.12 counts the borders in the horizontal and vertical blanking; EDID 1.4
     /// §3.12 does not. EDIDs in practice follow 1.3 (as edid-decode observes), and piaf
@@ -57,6 +57,9 @@ pub enum EdidWarning {
     /// refresh rate lower, at the same pixel clock. When the 1.3 reading leaves less than
     /// the front porch and sync pulse, `h_blank` is left `None` and
     /// [`DtdBlankingInconsistent`][EdidWarning::DtdBlankingInconsistent] follows.
+    ///
+    /// Not emitted when the caller settles the reading with
+    /// [`DtdBorderPolicy::Fixed`][crate::DtdBorderPolicy::Fixed].
     #[error(
         "DTD has non-zero borders ({h_border} pixels, {v_border} lines); its blanking is read as including them (EDID 1.3)"
     )]
@@ -66,17 +69,19 @@ pub enum EdidWarning {
         /// Vertical border on each side, in lines (byte 16).
         v_border: u8,
     },
-    /// A Detailed Timing Descriptor's horizontal blanking, less both borders (the EDID 1.3
-    /// reading piaf takes), is smaller than its front porch plus sync pulse: that reading is
-    /// impossible. The mode is kept with [`VideoMode::h_blank`][crate::VideoMode::h_blank]
-    /// left `None`.
+    /// A Detailed Timing Descriptor's horizontal blanking, as read with respect to its
+    /// borders, is smaller than its front porch plus sync pulse: that reading is impossible.
+    /// The mode is kept with [`VideoMode::h_blank`][crate::VideoMode::h_blank] left `None`.
     ///
-    /// Without borders the descriptor is malformed. With borders, the EDID 1.4 reading
-    /// (blanking excluding the borders, so `h_blank` = `blanking`) may still hold; piaf does
-    /// not switch to it, because the refresh rate and the mode's identity depend on the
-    /// reading too. The raw values are here for a caller that wants to apply it.
+    /// The reading is EDID 1.3 (the blanking less both borders) unless the caller fixed
+    /// another with [`DtdBorderPolicy::Fixed`][crate::DtdBorderPolicy::Fixed]; the mode's
+    /// [`dtd_border_reading`][crate::VideoMode::dtd_border_reading] records a fixed one.
+    /// Without borders, or under EDID 1.4 (`h_blank` = `blanking`), the descriptor is
+    /// malformed. Under an unsettled 1.3 reading with borders, the 1.4 reading may still
+    /// hold; piaf does not switch to it, because the refresh rate and the mode's identity
+    /// depend on the reading too. A caller can fix the 1.4 reading and decode again.
     #[error(
-        "DTD blanking {blanking} less 2 × border {h_border} cannot hold front porch {h_front_porch} and sync {h_sync_width}; h_blank left unset"
+        "DTD blanking {blanking} with borders {h_border} cannot hold front porch {h_front_porch} and sync {h_sync_width} under the reading taken; h_blank left unset"
     )]
     DtdBlankingInconsistent {
         /// Horizontal blanking as stored in the descriptor, in pixels.

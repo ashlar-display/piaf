@@ -37,9 +37,10 @@ use crate::model::capabilities::VideoMode;
 use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
-#[cfg(any(feature = "alloc", feature = "std"))]
-use crate::model::extension::ExtensionHandler;
 use crate::model::extension::StaticExtensionHandler;
+#[cfg(any(feature = "alloc", feature = "std"))]
+use crate::model::extension::{ExtensionHandler, HandlerContext};
+use crate::model::options::DecodeOptions;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::prelude::{Arc, Vec};
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -74,6 +75,17 @@ impl ExtensionHandler for Cea861Handler {
         caps: &mut DisplayCapabilities,
         warnings: &mut Vec<ParseWarning>,
     ) {
+        self.process_in_context(blocks, caps, warnings, &HandlerContext::default());
+    }
+
+    fn process_in_context(
+        &self,
+        blocks: &[&[u8; 128]],
+        caps: &mut DisplayCapabilities,
+        warnings: &mut Vec<ParseWarning>,
+        ctx: &HandlerContext<'_>,
+    ) {
+        let options = ctx.options();
         let Some(first) = blocks.first() else { return };
         let flags = Cea861Flags::from_bits_truncate(first[3]);
 
@@ -85,7 +97,8 @@ impl ExtensionHandler for Cea861Handler {
             .unwrap_or_else(|| Cea861Capabilities::new(flags));
         cea_caps.flags |= flags;
 
-        for ext in blocks {
+        for (i, ext) in blocks.iter().enumerate() {
+            let block = ctx.block_number(i);
             // Parse the data block collection: bytes 4 through dtd_offset-1.
             // When dtd_offset == 0 the spec says no DTDs are present, so data blocks
             // may fill the rest of the block (bytes 4–127).
@@ -102,6 +115,7 @@ impl ExtensionHandler for Cea861Handler {
                     caps,
                     &mut cea_caps,
                     warnings,
+                    options,
                 );
             }
 
@@ -111,7 +125,7 @@ impl ExtensionHandler for Cea861Handler {
                 let mut offset = dtd_offset;
                 let mut dtd_index: u8 = 0;
                 while offset + 18 <= 127 {
-                    decode_dtd_slot(&ext[offset..offset + 18], caps, dtd_index);
+                    decode_dtd_slot(&ext[offset..offset + 18], caps, block, dtd_index, options);
                     offset += 18;
                     dtd_index = dtd_index.saturating_add(1);
                 }
@@ -140,6 +154,7 @@ pub(crate) fn parse_cea861_data_block_collection(
     caps: &mut DisplayCapabilities,
     cea_caps: &mut Cea861Capabilities,
     warnings: &mut Vec<ParseWarning>,
+    options: &DecodeOptions,
 ) {
     let mut i = 0;
     while i < collection.len() {
@@ -189,7 +204,7 @@ pub(crate) fn parse_cea861_data_block_collection(
                 cea_caps.vesa_transfer_characteristic =
                     parse_vesa_transfer_characteristic(block_data);
             }
-            0x07 => handle_extended_tag_block(block_data, caps, cea_caps),
+            0x07 => handle_extended_tag_block(block_data, caps, cea_caps, options),
             _ => {}
         }
 
@@ -259,6 +274,7 @@ fn handle_extended_tag_block(
     block_data: &[u8],
     caps: &mut DisplayCapabilities,
     cea_caps: &mut Cea861Capabilities,
+    options: &DecodeOptions,
 ) {
     match block_data.first().copied() {
         Some(EXT_TAG_VSVDB) => {
@@ -275,7 +291,9 @@ fn handle_extended_tag_block(
             cea_caps.vesa_display_device = parse_vesa_display_device(&block_data[1..]);
         }
         Some(EXT_TAG_VTB_EXT) => {
-            if let Some(vtb) = parse_vtb_ext(&block_data[1..], &mut |w| caps.push_warning(w)) {
+            if let Some(vtb) =
+                parse_vtb_ext(&block_data[1..], options, &mut |w| caps.push_warning(w))
+            {
                 for timing in &vtb.timings {
                     push_mode_dedup(&mut caps.supported_modes, timing.clone());
                 }
@@ -368,7 +386,14 @@ fn handle_extended_tag_block(
 /// [`VideoMode`][crate::VideoMode] entries from VICs and timing data blocks. Reused
 /// from both the CEA-861 extension static path and the DisplayID 2.x CTA DisplayID
 /// block (tag `0x81`) static path.
-pub(crate) fn cea861_collection_into_sink(collection: &[u8], sink: &mut dyn ModeSink) {
+pub(crate) fn cea861_collection_into_sink(
+    collection: &[u8],
+    sink: &mut dyn ModeSink,
+    options: &DecodeOptions,
+) {
+    // Only VTB-EXT carries DTDs here, and it is decoded in alloc builds only.
+    #[cfg(not(any(feature = "alloc", feature = "std")))]
+    let _ = options;
     let mut i = 0;
     while i < collection.len() {
         let header = collection[i];
@@ -418,7 +443,7 @@ pub(crate) fn cea861_collection_into_sink(collection: &[u8], sink: &mut dyn Mode
             match block_data.first().copied() {
                 Some(EXT_TAG_VTB_EXT) => {
                     let mut found = Vec::new();
-                    let vtb = parse_vtb_ext(&block_data[1..], &mut |w| found.push(w));
+                    let vtb = parse_vtb_ext(&block_data[1..], options, &mut |w| found.push(w));
                     for w in found {
                         sink.push_warning(w);
                     }
@@ -472,7 +497,12 @@ pub(crate) fn cea861_collection_into_sink(collection: &[u8], sink: &mut dyn Mode
 /// Allocation-free counterpart to [`Cea861Handler::process`]: produces
 /// [`VideoMode`][crate::VideoMode] entries (SVDs, DTDs, and — in `alloc`/`std` builds —
 /// VTB-EXT/T7VTDB/T8VTDB/T10VTDB/Y420 VDB entries) without requiring heap allocation.
-pub(crate) fn cea861_process_into_sink(ext: &[u8; 128], sink: &mut dyn ModeSink) {
+pub(crate) fn cea861_process_into_sink(
+    ext: &[u8; 128],
+    sink: &mut dyn ModeSink,
+    block: Option<u8>,
+    options: &DecodeOptions,
+) {
     let dtd_offset = ext[2] as usize;
     let collection_end = if dtd_offset == 0 {
         128
@@ -481,7 +511,7 @@ pub(crate) fn cea861_process_into_sink(ext: &[u8; 128], sink: &mut dyn ModeSink)
     };
 
     if collection_end > 4 {
-        cea861_collection_into_sink(&ext[4..collection_end], sink);
+        cea861_collection_into_sink(&ext[4..collection_end], sink, options);
     }
 
     // Parse Detailed Timing Descriptors.
@@ -489,7 +519,7 @@ pub(crate) fn cea861_process_into_sink(ext: &[u8; 128], sink: &mut dyn ModeSink)
         let mut offset = dtd_offset;
         let mut dtd_index: u8 = 0;
         while offset + 18 <= 127 {
-            decode_dtd_slot_into_sink(&ext[offset..offset + 18], sink, dtd_index);
+            decode_dtd_slot_into_sink(&ext[offset..offset + 18], sink, block, dtd_index, options);
             offset += 18;
             dtd_index = dtd_index.saturating_add(1);
         }
@@ -502,8 +532,10 @@ impl StaticExtensionHandler for Cea861Handler {
     }
 
     fn process(&self, blocks: &[&[u8; 128]], ctx: &mut StaticContext<'_>) {
-        for block in blocks {
-            cea861_process_into_sink(block, ctx);
+        let options = *ctx.options();
+        for (i, ext) in blocks.iter().enumerate() {
+            let block = ctx.block_number(i);
+            cea861_process_into_sink(ext, ctx, block, &options);
         }
     }
 }
@@ -739,7 +771,7 @@ mod tests {
         assert_eq!(caps.supported_modes[0].h_blank, Some(144));
 
         let mut sink = Collect::default();
-        cea861_process_into_sink(&ext, &mut sink);
+        cea861_process_into_sink(&ext, &mut sink, Some(1), &DecodeOptions::new());
         assert_eq!(sink.0, [ambiguous]);
         assert_eq!(sink.1[0].h_blank, Some(144));
     }
@@ -768,7 +800,7 @@ mod tests {
         assert!(caps.supported_modes.iter().any(|m| m.h_blank == Some(272)));
 
         let mut sink = Collect::default();
-        cea861_process_into_sink(&ext, &mut sink);
+        cea861_process_into_sink(&ext, &mut sink, Some(1), &DecodeOptions::new());
         assert_eq!(sink.0, [ambiguous]);
         assert!(sink.1.iter().any(|m| m.h_blank == Some(272)));
     }

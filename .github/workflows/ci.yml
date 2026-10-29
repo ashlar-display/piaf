@@ -25,6 +25,7 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
+          targets: thumbv7em-none-eabi
 
       - name: Cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -52,10 +53,10 @@ jobs:
         run: cargo test --locked --features serde
 
       - name: Build (alloc only)
-        run: cargo build --locked --no-default-features --features alloc
+        run: cargo build --locked --no-default-features --features alloc --target thumbv7em-none-eabi
 
       - name: Build (no_std)
-        run: cargo build --locked --no-default-features
+        run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
   coverage:
     name: Coverage

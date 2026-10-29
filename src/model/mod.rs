@@ -8,7 +8,7 @@ pub use prelude::{Box, String, Vec};
 /// Extension handler traits and registries.
 pub mod extension;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use extension::ExtensionHandler;
+pub use extension::{ExtensionHandler, HandlerContext};
 pub use extension::{
     ExtensionLibrary, ExtensionMetadata, ExtensionTagRegistry, KnownExtensions,
     StaticExtensionHandler,
@@ -19,6 +19,10 @@ pub mod diagnostics;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use diagnostics::ParseWarning;
 pub use diagnostics::{EdidError, EdidWarning};
+
+/// Decoding options.
+pub mod options;
+pub use options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
 
 /// Private warning storage.
 pub(crate) mod warnings;

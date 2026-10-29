@@ -39,12 +39,13 @@ pipeline. Metadata-only blocks are dynamic-only.
 DisplayID 2.x writes into three places:
 
 - **`DisplayCapabilities`** — version-agnostic scalar fields (`product_code`,
-  `manufacture_date`, `display_name`, `preferred_image_size_mm`, `native_pixels`,
-  `color_bit_depth`, `max_pixel_clock_mhz`, `min_v_rate`, `max_v_rate`, etc.).
+  `manufacture_date`, `display_name`, `native_pixels`, `color_bit_depth`,
+  `max_pixel_clock_mhz`, `min_v_rate`, `max_v_rate`, etc.).
   These are the same fields the EDID base block, CEA-861, and DisplayID 1.x write to;
   later sources overwrite earlier values for the same field.
 - **`DisplayIdCapabilities`** (extension tag `0x70`) — DisplayID-specific records
-  including 2.x-only structures (`manufacturer_oui`, `display_params_v2`,
+  including the Display Parameters image size (`image_size`) and 2.x-only structures
+  (`manufacturer_oui`, `display_params_v2`,
   `dynamic_timing_range`, `interface_features`, `stereo_interface_v2`, `container_id`,
   `vendor_specific`).
 - **`Cea861Capabilities`** (extension tag `0x02`) — only via the `0x81` CTA DisplayID
@@ -81,7 +82,7 @@ Fields decoded into `DisplayCapabilities` and `DisplayIdCapabilities`:
 
 | Field                          | Source                                                                                                                                                                    |
 |--------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `caps.preferred_image_size_mm` | Bytes 0–3, LE uint16 pairs; precision in 0.1 mm or 1 mm depending on revision bit 7                                                                                       |
+| `did.image_size`               | Bytes 0–3, LE uint16 pairs, stored with their unit: 0.1 mm or 1 mm depending on revision bit 7                                                                            |
 | `caps.native_pixels`           | Bytes 4–7, LE uint16 pairs; `None` when either axis is `0`                                                                                                                |
 | `caps.color_bit_depth`         | Byte 27 bits 2:0 (`1=6 bpc … 5=16 bpc`); 14 bpc is not representable in this encoding                                                                                     |
 | `did.display_params_v2`        | 12-bit chromaticities (3 primaries + white), max/10%/min luminance (binary16),         display technology, gamma, scan orientation, audio routing, CIE coordinate variant |

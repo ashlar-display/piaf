@@ -74,30 +74,30 @@ as unspecified and not stored.
 
 ### Display Parameters Block (`0x01`)
 
-Describes the physical display size and color bit depth.
+Describes the physical image size, native pixel count, aspect ratio and color bit depth.
 
 ```
 Byte  0:     Block tag (0x01)
 Byte  1:     Revision
-Byte  2:     Payload length (minimum 6 bytes)
+Byte  2:     Payload length (12 bytes)
 
 Per payload:
-  Bytes 0–1: Horizontal image size in mm (LE uint16; 0 = not defined)
-  Bytes 2–3: Vertical image size in mm (LE uint16; 0 = not defined)
-  Byte  4:   Display technology (bits 7:4) and feature support flags (bits 3:0)
-             Display technology: 0=monochrome, 1=RGB, 2=non-RGB multicolor
-             Feature flags: bit 3=audio input, bit 2=separate default color char,
-                            bit 1=power management, bit 0=fixed timing
-  Byte  5:   Color bit depth:
-             Bits 4:0 = interface data bit depth per primary:
-               001=6 bpc, 010=8 bpc, 011=10 bpc, 100=12 bpc, 101=14 bpc, 110=16 bpc
-               000=undefined, 111=reserved
-             Bits 7:5 = overall display color bit depth (same encoding)
+  Bytes 0–1: Horizontal image size in 0.1 mm (LE uint16; 0 = not defined)
+  Bytes 2–3: Vertical image size in 0.1 mm (LE uint16; 0 = not defined)
+  Bytes 4–5: Horizontal native pixel count (LE uint16; 0 = not defined)
+  Bytes 6–7: Vertical native pixel count (LE uint16; 0 = not defined)
+  Byte  8:   Feature support flags (not decoded)
+  Byte  9:   Gamma, stored as (γ − 1) × 100; 0xFF = unspecified (not decoded)
+  Byte 10:   Aspect ratio, stored as (AR − 1) × 100
+  Byte 11:   Color bit depth: bits 3:0 = native bpc − 1
 ```
 
-When both image size fields are non-zero they are written to `preferred_image_size_mm`.
-Color bit depth is decoded from bits 4:0 of byte 5 into `color_bit_depth`. Both fields
-are only available from the dynamic pipeline.
+When both image size fields are non-zero they are written to
+`DisplayIdCapabilities::image_size`, in tenths of a millimetre (as edid-decode and
+libdisplay-info read them); the base block's `preferred_image_size_mm` is not touched.
+Native pixels go to `native_pixels`, the aspect ratio to `panel_aspect_ratio_100`, and the
+color bit depth to `color_bit_depth`. These fields are only available from the dynamic
+pipeline.
 
 ### Color Characteristics Block (`0x02`)
 

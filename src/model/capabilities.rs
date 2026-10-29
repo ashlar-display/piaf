@@ -1,11 +1,15 @@
 use crate::model::diagnostics::EdidWarning;
 use crate::model::manufacture::{ManufacturerId, MonitorString};
+use crate::model::options::DecodeOptions;
 use crate::model::warnings::InlineWarnings;
 
 pub use display_types::{
     CvtAlgorithm, ModeSource, RefreshRate, StereoMode, SyncDefinition, TypeIxStereoMode, VideoMode,
 };
-pub use display_types::{DisplayCapabilities, ExtensionData};
+// From its module: display-types re-exports it at the root only with `alloc`.
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use display_types::ExtensionData;
+pub use display_types::capabilities::DisplayCapabilities;
 
 /// Sink for mode and warning writes from extension handlers.
 ///
@@ -30,17 +34,51 @@ pub trait ModeSink {
 /// This allows the context to grow over time — additional sink types can be added as
 /// `Option` fields without changing the handler trait signature.
 ///
-/// Currently wraps a [`ModeSink`] for video mode and warning output. Future fields will
-/// provide access to identity, colorimetry, and other sink types as the static pipeline
-/// is extended.
+/// Currently wraps a [`ModeSink`] for video mode and warning output, the run's
+/// [`DecodeOptions`] and the EDID block number of each block. Future fields will provide access to identity, colorimetry, and other
+/// sink types as the static pipeline is extended.
 pub struct StaticContext<'a> {
     modes: &'a mut dyn ModeSink,
+    options: DecodeOptions,
+    block_numbers: &'a [u8],
 }
 
 impl<'a> StaticContext<'a> {
-    /// Creates a new context backed by `modes`.
+    /// Creates a new context backed by `modes`, with the default [`DecodeOptions`] and no
+    /// block numbers.
     pub fn new(modes: &'a mut dyn ModeSink) -> Self {
-        Self { modes }
+        Self {
+            modes,
+            options: DecodeOptions::new(),
+            block_numbers: &[],
+        }
+    }
+
+    /// Sets the decode options, returning the updated context.
+    pub fn with_options(mut self, options: DecodeOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Sets the block numbers, returning the updated context: `block_numbers[i]` is the
+    /// EDID block number (0 for the base block, `n` for the `n`th block after it) of the
+    /// handler's `blocks[i]`.
+    pub fn with_block_numbers(mut self, block_numbers: &'a [u8]) -> Self {
+        self.block_numbers = block_numbers;
+        self
+    }
+
+    /// The EDID block number of the handler's `blocks[i]`; `None` when the context was
+    /// built without block numbers or `i` is out of range.
+    pub fn block_number(&self, i: usize) -> Option<u8> {
+        self.block_numbers.get(i).copied()
+    }
+
+    /// The options the caller decodes with. A handler applies them to the data it decodes,
+    /// e.g. [`dtd_border_policy`][DecodeOptions::dtd_border_policy] to any Detailed Timing
+    /// Descriptor in its blocks.
+    pub fn options(&self) -> &DecodeOptions {
+        &self.options
     }
 
     /// Pushes a decoded video mode. Duplicate modes are silently ignored.
