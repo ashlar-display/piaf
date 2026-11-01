@@ -97,9 +97,12 @@ impl ExtensionHandler for BaseBlockHandler {
         caps.preferred_image_size_mm = timings::preferred_image_size_mm(base);
         // Use decode_dtd_slot (not decode_detailed_timings) to preserve upgrade-in-place
         // semantics.
-        for i in 0..4u8 {
-            let offset = 0x36 + (i as usize * 18);
-            timings::decode_dtd_slot(&base[offset..offset + 18], caps, Some(0), i, options);
+        let mut index = 0u8;
+        for slot in base[0x36..0x7E].chunks_exact(18) {
+            timings::decode_dtd_slot(slot, caps, Some(0), index, options);
+            if timings::is_timing_descriptor(slot) {
+                index += 1;
+            }
         }
     }
 }

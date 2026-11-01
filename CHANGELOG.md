@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builds, the CTA block's DTDs in every build) was dropped with its pixel clock, blanking
   and source. A DTD now replaces such an entry, as `DisplayCapabilities` does; an earlier
   DTD's entry is kept.
+- **`ModeSource::Dtd { index }` counted descriptor slots, not timing descriptors.** A
+  display descriptor before a timing (base block or CTA block) shifted the timing's
+  index, so the base block's first timing could be `index: 1`. The index now counts timing
+  descriptors only, as its documentation says and edid-decode numbers them; it changes
+  only for EDIDs with that layout.
 
 ## [0.5.0] - 2026-10-29
 

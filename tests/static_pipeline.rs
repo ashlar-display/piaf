@@ -456,3 +456,21 @@ fn static_keeps_the_first_of_two_matching_dtds() {
         Some(piaf::model::capabilities::ModeSource::Dtd { block: 0, index: 0 })
     );
 }
+
+#[test]
+fn cta_dtd_index_counts_timing_descriptors_only() {
+    let mut bytes = edid_with_cea_vdb(&[]);
+    let dtd_offset = 128 + usize::from(bytes[130]);
+    // A display descriptor (zero pixel clock) in the first slot, the timing in the second.
+    bytes[dtd_offset..dtd_offset + 5].copy_from_slice(&[0, 0, 0, 0x10, 0]);
+    bytes[dtd_offset + 18..dtd_offset + 36].copy_from_slice(&DTD_1080P60);
+    fix_checksums(&mut bytes);
+
+    let entries = static_1080p60_entries(&bytes);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].source,
+        Some(piaf::model::capabilities::ModeSource::Dtd { block: 1, index: 0 })
+    );
+    assert_same_modes_as_alloc(&bytes);
+}

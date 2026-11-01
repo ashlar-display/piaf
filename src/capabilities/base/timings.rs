@@ -328,10 +328,23 @@ pub(super) fn decode_detailed_timings(
     sink: &mut dyn ModeSink,
     options: &DecodeOptions,
 ) {
-    for i in 0..4u8 {
-        let offset = 0x36 + (i as usize * 18);
-        decode_dtd_slot_into_sink(&base[offset..offset + 18], sink, Some(0), i, options);
+    let mut index = 0u8;
+    for slot in base[0x36..0x7E].chunks_exact(18) {
+        decode_dtd_slot_into_sink(slot, sink, Some(0), index, options);
+        if is_timing_descriptor(slot) {
+            index += 1;
+        }
     }
+}
+
+/// Whether an 18-byte descriptor slot holds a timing (non-zero pixel clock), not a display
+/// descriptor or padding.
+///
+/// `ModeSource::Dtd { index }` counts these slots within a block, as edid-decode numbers
+/// them ("DTD 1"), whether or not the timing then decodes: a display descriptor before a
+/// timing does not shift its index.
+pub(crate) fn is_timing_descriptor(slot: &[u8]) -> bool {
+    matches!(slot, [lo, hi, ..] if *lo != 0 || *hi != 0)
 }
 
 #[cfg(test)]

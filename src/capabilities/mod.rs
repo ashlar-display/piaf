@@ -747,6 +747,41 @@ mod static_tests {
         assert_eq!(entry.source, Some(ModeSource::Dtd { block: 0, index: 0 }));
     }
 
+    /// A display descriptor before the base block's first timing does not shift its
+    /// index: `Dtd { index }` counts timing descriptors, as edid-decode numbers them.
+    #[test]
+    fn test_dtd_index_counts_timing_descriptors_only() {
+        let mut bytes = [0u8; 128];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x36..0x3D].copy_from_slice(&[0, 0, 0, 0xFC, 0, b'P', b'A']); // monitor name
+        bytes[0x3D] = b'\n';
+        bytes[0x48..0x5A].copy_from_slice(&[
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0x00, 0, 0, 0, 0, 0, 0x1E,
+        ]); // 1920×1080 @ 60 Hz in slot 1
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let first_dtd = Some(ModeSource::Dtd { block: 0, index: 0 });
+
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+        let mut dtds = caps.iter_modes().filter(|m| m.width == 1920);
+        assert_eq!(dtds.next().unwrap().source, first_dtd);
+        assert!(dtds.next().is_none());
+
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        {
+            let library = ExtensionLibrary::with_standard_handlers();
+            let caps = capabilities_from_edid(&parse_edid(&bytes, &library).unwrap(), &library);
+            let sources: Vec<_> = caps
+                .supported_modes
+                .iter()
+                .filter(|m| m.width == 1920)
+                .map(|m| m.source)
+                .collect();
+            assert_eq!(sources, [first_dtd]);
+        }
+    }
+
     // VTB-EXT is decoded in alloc builds only.
     const BORDERED_MODES: usize = if cfg!(any(feature = "alloc", feature = "std")) {
         3
