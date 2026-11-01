@@ -781,6 +781,104 @@ mod static_tests {
         assert_eq!(caps.preferred_timing.map(|m| m.width), Some(1920));
     }
 
+    /// A base block of the given EDID revision and feature byte, with a 1920×1080 timing in
+    /// `timing_slot` (if any) and a monitor name in every other slot before it.
+    fn base_with_timing_in(revision: u8, features: u8, timing_slot: Option<usize>) -> [u8; 128] {
+        let mut bytes = [0u8; 128];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12..0x14].copy_from_slice(&[1, revision]);
+        bytes[0x18] = features;
+        let slots = timing_slot.unwrap_or(4);
+        for slot in 0..slots {
+            let o = 0x36 + slot * 18;
+            bytes[o..o + 5].copy_from_slice(&[0, 0, 0, 0xFC, 0]); // monitor name
+            bytes[o + 5] = b'\n';
+        }
+        if let Some(slot) = timing_slot {
+            let o = 0x36 + slot * 18;
+            bytes[o..o + 18].copy_from_slice(&bordered_dtd(14850, (1920, 280), (1080, 45), 88, 44));
+            bytes[o + 15] = 0; // no borders
+        }
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        bytes
+    }
+
+    /// The preferred-timing warnings the static pipeline reports for `bytes`.
+    fn preferred_timing_warnings(bytes: &[u8; 128]) -> ([Option<EdidWarning>; 2], usize) {
+        let parsed = parse_edid(bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+        let mut found = [None; 2];
+        let mut n = 0;
+        for w in caps.iter_warnings().filter(|w| {
+            matches!(
+                w,
+                EdidWarning::PreferredTimingNotInFirstSlot { .. }
+                    | EdidWarning::PreferredTimingBitClear
+            )
+        }) {
+            if n < 2 {
+                found[n] = Some(*w);
+            }
+            n += 1;
+        }
+        (found, n)
+    }
+
+    #[test]
+    fn test_warns_when_the_preferred_timing_is_not_in_slot_0() {
+        let (found, n) = preferred_timing_warnings(&base_with_timing_in(4, 0, Some(1)));
+        assert_eq!(n, 1);
+        let expected = EdidWarning::PreferredTimingNotInFirstSlot {
+            timing_slot: Some(1),
+        };
+        assert_eq!(found[0], Some(expected));
+
+        let (found, n) = preferred_timing_warnings(&base_with_timing_in(4, 0, None));
+        assert_eq!(n, 1);
+        let expected = EdidWarning::PreferredTimingNotInFirstSlot { timing_slot: None };
+        assert_eq!(found[0], Some(expected));
+    }
+
+    #[test]
+    fn test_warns_for_edid_1_3_without_the_preferred_timing_bit() {
+        let (found, n) = preferred_timing_warnings(&base_with_timing_in(3, 0, Some(0)));
+        assert_eq!(
+            (found[0], n),
+            (Some(EdidWarning::PreferredTimingBitClear), 1)
+        );
+        // Only once, not also for the slot: without the bit there is no preferred timing.
+        let (_, n) = preferred_timing_warnings(&base_with_timing_in(3, 0, Some(1)));
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn test_no_preferred_timing_warning_where_none_is_due() {
+        for (revision, features) in [(4, 0x00), (4, 0x02), (3, 0x02), (2, 0x00)] {
+            let (_, n) =
+                preferred_timing_warnings(&base_with_timing_in(revision, features, Some(0)));
+            assert_eq!(n, 0, "1.{revision} {features:#x}");
+        }
+    }
+
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    #[test]
+    fn test_preferred_timing_warnings_reach_display_capabilities() {
+        let bytes = base_with_timing_in(4, 0, Some(2));
+        let library = ExtensionLibrary::with_standard_handlers();
+        let caps = capabilities_from_edid(&parse_edid(&bytes, &library).unwrap(), &library);
+        let expected = EdidWarning::PreferredTimingNotInFirstSlot {
+            timing_slot: Some(2),
+        };
+        let found: Vec<_> = caps
+            .iter_warnings()
+            .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
+            .filter(|w| *w == expected)
+            .collect();
+        assert_eq!(found, [expected]);
+        assert_eq!(caps.preferred_timing.map(|m| m.width), Some(1920));
+    }
+
     /// Runs in every build, bare `no_std` included, where the base block's modes go
     /// through `StaticDisplayCapabilities`' own sink rather than `BaseBlockHandler`.
     #[test]

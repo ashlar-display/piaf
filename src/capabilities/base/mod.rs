@@ -59,6 +59,7 @@ pub(super) fn decode_base_block(
     }
     descriptors::decode_descriptors_meta(base, caps);
     caps.preferred_image_size_mm = timings::preferred_image_size_mm(base);
+    timings::preferred_timing_warnings(base, &mut |w| warn.push_warning(w));
 }
 
 /// Decodes the EDID base block into [`DisplayCapabilities`].
@@ -99,6 +100,7 @@ impl ExtensionHandler for BaseBlockHandler {
         timings::decode_established_timings(base, caps);
         timings::decode_standard_timings(base, caps);
         caps.preferred_image_size_mm = timings::preferred_image_size_mm(base);
+        timings::preferred_timing_warnings(base, &mut |w| warnings.push(Arc::new(w)));
         // The preferred timing is the first timing descriptor, decoded once for both the
         // field and the mode list (so its warnings are reported once).
         let has_preferred = timings::has_preferred_timing(base);

@@ -322,6 +322,23 @@ pub(super) fn has_preferred_timing(base: &[u8; 128]) -> bool {
     base[0x13] >= 4 || base[0x18] & 0x02 != 0
 }
 
+/// Reports a preferred timing that is not where EDID puts it:
+/// [`EdidWarning::PreferredTimingNotInFirstSlot`] when the EDID has one but slot 0 is not a
+/// timing, [`EdidWarning::PreferredTimingBitClear`] for EDID 1.3 without the feature bit.
+pub(super) fn preferred_timing_warnings(base: &[u8; 128], warn: &mut dyn FnMut(EdidWarning)) {
+    if has_preferred_timing(base) {
+        let mut slots = base[0x36..0x7E].chunks_exact(18);
+        if !slots.next().is_some_and(is_timing_descriptor) {
+            let timing_slot = (1..4u8).zip(slots).find(|(_, s)| is_timing_descriptor(s));
+            warn(EdidWarning::PreferredTimingNotInFirstSlot {
+                timing_slot: timing_slot.map(|(i, _)| i),
+            });
+        }
+    } else if base[0x13] == 3 {
+        warn(EdidWarning::PreferredTimingBitClear);
+    }
+}
+
 /// The descriptor slot of the preferred timing: the base block's first timing descriptor,
 /// wherever it sits. `None` when the EDID has no preferred timing
 /// ([`has_preferred_timing`]) or the base block holds no timing descriptor.

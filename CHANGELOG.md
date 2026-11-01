@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Linux's DRM read it. Extension blocks never fill it. It replaces searching
   `supported_modes` for that source. `StaticDisplayCapabilities::preferred_timing` carries
   it in no-alloc builds, set even when the mode list is full.
+- **Warnings for a misplaced preferred timing**: `EdidWarning::PreferredTimingNotInFirstSlot
+  { timing_slot }` when the EDID has a preferred timing but the base block's first slot is
+  not a timing (edid-decode and libdisplay-info both flag it; `timing_slot` is where the
+  first timing is, `None` for none), and `EdidWarning::PreferredTimingBitClear` for an
+  EDID 1.3 base block without the preferred-timing feature bit (as edid-decode flags it).
 
 ### Changed
 

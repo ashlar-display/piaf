@@ -93,6 +93,24 @@ pub enum EdidWarning {
         /// Horizontal sync pulse width, in pixels.
         h_sync_width: u16,
     },
+    /// The EDID has a preferred timing, but the base block's first descriptor slot does not
+    /// hold a timing (edid-decode and libdisplay-info both flag this).
+    ///
+    /// The preferred timing belongs in the first slot. piaf still takes the base block's
+    /// first timing descriptor as the preferred timing, as edid-decode and Linux's DRM do.
+    #[error("preferred timing is not in the base block's first descriptor slot")]
+    PreferredTimingNotInFirstSlot {
+        /// The slot (1–3) of the base block's first timing descriptor, now the preferred
+        /// timing; `None` when the base block holds no timing descriptor.
+        timing_slot: Option<u8>,
+    },
+    /// An EDID 1.3 base block has the preferred-timing feature bit (byte `0x18`, bit 1)
+    /// clear, which EDID 1.3 requires to be set (edid-decode flags this).
+    ///
+    /// piaf reports no preferred timing, as the bit says; the base block's timings are
+    /// still decoded as modes.
+    #[error("EDID 1.3 base block without the preferred-timing feature bit")]
+    PreferredTimingBitClear,
     /// An HDMI Audio Data Block declares MS NonMixed support with a maximum stream count of
     /// one (edid-decode and libdisplay-info both flag this). The flag is kept as declared.
     #[error("HDMI Audio Data Block: MS NonMixed support declared with a single stream")]
