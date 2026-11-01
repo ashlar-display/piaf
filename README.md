@@ -248,6 +248,7 @@ counts the rest.
 | `analog_color_type`                 | `Option<AnalogColorType>`                                   |
 | `screen_size`                       | `Option<ScreenSize>`                                        |
 | `preferred_image_size_mm`           | `Option<(u16, u16)>`                                        |
+| `preferred_timing`                  | `Option<VideoMode>`                                         |
 | `min_v_rate` / `max_v_rate`         | `Option<u16>`                                               |
 | `min_h_rate_khz` / `max_h_rate_khz` | `Option<u16>`                                               |
 | `max_pixel_clock_mhz`               | `Option<u16>`                                               |
@@ -292,7 +293,7 @@ Fields decoded by `BaseBlockHandler`:
 | Established timings I/II    | bytes `0x23`–`0x25`                  | Bitmap of 17 legacy modes decoded as `VideoMode` entries                                             |
 | Established timings III     | descriptor `0xF7`                    | Extended bitmap of 44 additional VESA modes                                                          |
 | Standard timings            | bytes `0x26`–`0x35`                  | Up to 8 resolution + refresh rate pairs decoded as `VideoMode` entries                               |
-| Detailed timing descriptors | slots `0x36`, `0x48`, `0x5A`, `0x6C` | Full DTD parameters decoded as `VideoMode`; DTD 0's image size sets `preferred_image_size_mm`        |
+| Detailed timing descriptors | slots `0x36`, `0x48`, `0x5A`, `0x6C` | Full DTD parameters decoded as `VideoMode`; the first is `preferred_timing`, with its image size in `preferred_image_size_mm` (EDID 1.4+, or 1.3 and earlier with the preferred-timing bit) |
 | Monitor name                | descriptor `0xFC`                    | Display name string                                                                                  |
 | Serial number string        | descriptor `0xFF`                    | Serial number as text                                                                                |
 | Unspecified text            | descriptor `0xFE`                    | Manufacturer-defined ASCII string                                                                    |

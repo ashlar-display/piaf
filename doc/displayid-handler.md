@@ -89,8 +89,11 @@ Stored under tag `0x70` in `DisplayCapabilities::extension_data`:
 
 | `DisplayCapabilities` field | Source                                                                        |
 |-----------------------------|-------------------------------------------------------------------------------|
-| `preferred_image_size_mm`   | LE uint16 pairs at payload bytes 0–3; `0` on either axis = not defined        |
 | `color_bit_depth`           | Payload byte 5, bits 4:0; same `001=6bpc … 110=16bpc` encoding as EDID `0x14` |
+
+The image size (payload bytes 0–3, LE uint16 pairs, `0` on either axis = not defined) goes to
+`DisplayIdCapabilities::image_size` with its unit; `preferred_image_size_mm` belongs to the
+base block's preferred timing and is not touched.
 
 **Color Characteristics Block** (tag `0x02`) is decoded into the following
 `DisplayCapabilities` field (dynamic pipeline only):

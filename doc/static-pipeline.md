@@ -204,8 +204,11 @@ speaker allocation — those require the alloc pipeline and are available throug
 On Cortex-M0 targets with small stacks, place the result in a `static mut` if stack pressure is
 a concern.
 
-**`preferred_image_size_mm`.** The image size of the preferred timing (the base block's first
-DTD), populated in every build. Other DTDs, CEA or base, do not set it.
+**`preferred_timing` and `preferred_image_size_mm`.** The preferred timing (the base block's
+first timing descriptor; EDID 1.4 and later always have one, 1.3 and earlier only with the
+preferred-timing feature bit) and its image size, populated in every build. Other DTDs, CTA
+or base, do not set them. `preferred_timing` is set even when `supported_modes` is full, and
+is decoded once: the mode in the list, if it fits, is the same value.
 
 **Multi-block formats in bare `no_std`.** In `alloc`/`std` builds, the dispatch layer collects
 all fragments for a given tag and calls the handler once with the full slice. In bare `no_std`
