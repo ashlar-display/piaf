@@ -213,8 +213,11 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
         );
         // base_caps now holds scalar fields, preferred_image_size_mm, and supported_modes.
         // The base block's warnings are `EdidWarning`s behind `Arc<dyn Error>`; copy them
-        // into the static output, as the bare no_std path below records them directly.
-        for warning in base_caps.warnings.iter().chain(w.iter()) {
+        // into the static output, as the bare no_std path below records them directly. In
+        // the same order as that path (header and preferred-timing warnings, collected in
+        // `w`, before the DTDs'), so a full warning list keeps the same warnings in every
+        // build.
+        for warning in w.iter().chain(base_caps.warnings.iter()) {
             if let Some(&edid_warning) =
                 (**warning).downcast_ref::<crate::model::diagnostics::EdidWarning>()
             {
@@ -843,6 +846,33 @@ mod static_tests {
             v_blank: 45,
         };
         assert_eq!(caps.iter_warnings().filter(|w| **w == expected).count(), 1);
+    }
+
+    /// The base block's warnings come in the same order with and without `alloc`, so a
+    /// full warning list keeps the same ones in every build.
+    #[test]
+    fn test_static_pipeline_orders_base_warnings_the_same_in_every_build() {
+        // Manufacturer ID all zero (invalid), timing in slot 1, with a 2-pixel border.
+        let mut bytes = base_with_timing_in(4, 0, Some(1));
+        bytes[0x48 + 15] = 2;
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        assert_eq!(
+            caps.warnings(),
+            [
+                EdidWarning::InvalidManufacturerId,
+                EdidWarning::PreferredTimingNotInFirstSlot {
+                    timing_slot: Some(1)
+                },
+                EdidWarning::DtdBordersAmbiguous {
+                    h_border: 2,
+                    v_border: 0
+                },
+            ]
+        );
     }
 
     #[test]

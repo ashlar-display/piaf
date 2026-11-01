@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps no other record of that VIC; `DisplayCapabilities` has always behaved this way, with
   the VIC still in `Cea861Capabilities::vics`. Code that matched on `Vic` for such a mode no
   longer finds it.
+- **`StaticDisplayCapabilities` ordered the base block's warnings differently with
+  `alloc`.** With `alloc` the DTD warnings came before `InvalidManufacturerId` (and now the
+  preferred-timing warnings); in bare `no_std` after them. With only
+  `MAX_STATIC_WARNINGS` kept, a full list could hold different warnings per build. Both
+  now report the header and preferred-timing warnings first, then the DTDs'.
 - **`ModeSource::Dtd { index }` counted descriptor slots, not timing descriptors.** A
   display descriptor before a timing (base block or CTA block) shifted the timing's
   index, so the base block's first timing could be `index: 1`. The index now counts timing
