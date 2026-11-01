@@ -420,7 +420,7 @@ fn static_base_dtd_takes_over_a_standard_timing() {
     assert_eq!(entries[0].h_front_porch, 88);
     assert_eq!(
         entries[0].source,
-        Some(piaf::model::capabilities::ModeSource::Dtd { block: 0, index: 0 })
+        Some(piaf::ModeSource::Dtd { block: 0, index: 0 })
     );
     assert_same_modes_as_alloc(&bytes);
 }
@@ -437,7 +437,7 @@ fn static_cta_dtd_takes_over_its_svd() {
     assert_eq!(entries[0].pixel_clock_khz, Some(148_500));
     assert_eq!(
         entries[0].source,
-        Some(piaf::model::capabilities::ModeSource::Dtd { block: 1, index: 0 })
+        Some(piaf::ModeSource::Dtd { block: 1, index: 0 })
     );
     assert_same_modes_as_alloc(&bytes);
 }
@@ -453,7 +453,7 @@ fn static_keeps_the_first_of_two_matching_dtds() {
     assert_eq!(entries.len(), 1);
     assert_eq!(
         entries[0].source,
-        Some(piaf::model::capabilities::ModeSource::Dtd { block: 0, index: 0 })
+        Some(piaf::ModeSource::Dtd { block: 0, index: 0 })
     );
 }
 
@@ -470,7 +470,7 @@ fn cta_dtd_index_counts_timing_descriptors_only() {
     assert_eq!(entries.len(), 1);
     assert_eq!(
         entries[0].source,
-        Some(piaf::model::capabilities::ModeSource::Dtd { block: 1, index: 0 })
+        Some(piaf::ModeSource::Dtd { block: 1, index: 0 })
     );
     assert_same_modes_as_alloc(&bytes);
 }

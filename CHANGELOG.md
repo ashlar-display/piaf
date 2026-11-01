@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ModeSource` is re-exported at the crate root** (`piaf::ModeSource`), next to
+  `VideoMode`, whose `source` field uses it; it was reachable only as
+  `piaf::model::capabilities::ModeSource`.
 - **The preferred timing, `DisplayCapabilities::preferred_timing`** (display-types
   0.5.1): the base block's first timing descriptor, with its full timing and source
   `Dtd { block: 0, index: 0 }`. EDID 1.4 and later always have one; EDID 1.3 and earlier
