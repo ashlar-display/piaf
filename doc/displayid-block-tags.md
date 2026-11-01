@@ -14,8 +14,8 @@ sits at `block[4 + N]` (where `N = block[2]`, the section byte count) and must m
 `block[1..=4+N]` sum to zero mod 256. An invalid checksum emits `EdidWarning::DisplayIdChecksumMismatch`
 but processing continues with whatever data is present.
 
-> **Note:** Tag assignments below are sourced from the DisplayID 1.3 specification structure.
-> They have not been confirmed against a spec PDF. Verify against the VESA document before
+> **Note:** Tag assignments below are sourced from the DisplayID 1.3 document structure.
+> They have not been confirmed against the VESA document itself. Verify against it before
 > implementing additional block types, and validate with a real DisplayID fixture.
 
 ## Tag assignments
@@ -297,7 +297,7 @@ Per payload:
   Byte  14:    Video timing support flags (not stored)
 ```
 
-Note: the specification document lists payload length as `9`, but the field table spans
+Note: the VESA document lists payload length as `9`, but the field table spans
 15 payload bytes. The 15-byte interpretation is used here as it is self-consistent.
 
 Decoded into `caps`: `max_pixel_clock_mhz`, `min_h_rate_khz`, `max_h_rate_khz`,

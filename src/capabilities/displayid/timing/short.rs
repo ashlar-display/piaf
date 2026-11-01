@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_type_v_refresh_raw_255_yields_256hz() {
-        // refresh_raw = 255 → raw + 1 = 256 Hz (exact per spec; no longer clamped)
+        // refresh_raw = 255 → raw + 1 = 256 Hz (exact; no longer clamped)
         let d = make_type_v_descriptor(3840, 2160, 255);
         let mut caps = DisplayCapabilities::default();
         decode_type_v_descriptor(&d, &mut caps);

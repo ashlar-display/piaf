@@ -10,7 +10,7 @@ use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
 /// manufacturer-specific and are not decoded here.
 pub(super) fn decode_established_timings(base: &[u8; 128], sink: &mut dyn ModeSink) {
     // (byte offset, bit mask, width, height, refresh_rate)
-    // Note: 1024x768@87 is interlaced in the EDID spec; stored as-is since VideoMode
+    // Note: 1024x768@87 is interlaced in EDID; stored as-is since VideoMode
     // has no interlace field.
     const TIMINGS: &[(usize, u8, u16, u16, u16)] = &[
         (0x23, 0x80, 720, 400, 70),

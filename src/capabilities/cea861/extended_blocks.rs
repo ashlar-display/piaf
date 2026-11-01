@@ -77,7 +77,7 @@ pub(super) const IMPLEMENTED_EXTENDED_TAGS: &[u8] = &[
 ///
 /// Each entry is an inclusive `(first, last)` range. These are listed here so
 /// that `test_all_extended_tags_accounted_for` can confirm there are no gaps.
-/// When the CTA spec assigns a new tag, remove it from the appropriate range,
+/// When CTA-861 assigns a new tag, remove it from the appropriate range,
 /// add an `EXT_TAG_*` constant, and implement the block (or add it to
 /// `IMPLEMENTED_EXTENDED_TAGS` as a no-op stub).
 #[cfg(test)]
@@ -340,7 +340,7 @@ pub(super) fn parse_y420_vdb(block_data: &[u8]) -> Vec<u8> {
 /// A set bit means that mode **also** supports YCbCr 4:2:0.
 ///
 /// An empty `Vec` means all modes in the Video Data Block support 4:2:0
-/// (per the CTA-861 spec when this block is absent).
+/// (per CTA-861 when this block is absent).
 pub(super) fn parse_y420_capability_map(block_data: &[u8]) -> Vec<u8> {
     // block_data[0] = extended tag; bitmap bytes start at [1].
     block_data[1..].to_vec()
@@ -527,7 +527,7 @@ pub(super) fn parse_t10vtdb(block_data: &[u8]) -> Option<T10VtdbBlock> {
     let rev = *block_data.first()?;
     let m = (rev >> 4) & 0x07;
     if m > 2 {
-        return None; // invalid per spec
+        return None; // invalid per CTA-861
     }
     let sz = 6 + m as usize;
 
@@ -569,7 +569,7 @@ pub(super) fn parse_t10vtdb(block_data: &[u8]) -> Option<T10VtdbBlock> {
 /// Returns the EDID extension block count override, or `None` if the payload
 /// is empty or the count is zero (meaningless).
 ///
-/// The HF-EEODB is defined in HDMI 2.1 section 10.3.6. It must be the first
+/// The HF-EEODB is defined by HDMI 2.1. It must be the first
 /// data block of Block 1 and overrides the extension count in the base EDID
 /// header for HDMI 2.1 sinks whose full E-EDID exceeds what the 1-byte base
 /// count can represent.
@@ -2078,7 +2078,7 @@ mod tests {
     fn test_all_extended_tags_accounted_for() {
         // Every value 0x00–0xFF must be either in IMPLEMENTED_EXTENDED_TAGS or
         // within one of RESERVED_EXTENDED_TAG_RANGES.  If this test fails after
-        // a spec update, add an EXT_TAG_* constant, implement the block (or add
+        // a CTA-861 update, add an EXT_TAG_* constant, implement the block (or add
         // a stub), update IMPLEMENTED_EXTENDED_TAGS, and shrink the relevant
         // reserved range.
         for tag in 0u16..=255 {

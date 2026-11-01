@@ -292,8 +292,8 @@ const IMPLEMENTED_BLOCK_TAGS: &[u8] = &[
     TAG_TYPE_VI_TIMING,           // 0x13 — Video Timing Modes Type VI — Detailed Timings Block
 ];
 
-/// DisplayID 1.x data block tags that are defined by the specification but not
-/// yet decoded, plus tag ranges reserved or unassigned by the specification.
+/// DisplayID 1.x data block tags that are defined by DisplayID 1.x but not
+/// yet decoded, plus tag ranges reserved or unassigned by it.
 ///
 /// Each entry is an inclusive `(first, last)` range. When a new block type is
 /// implemented, remove its tag from here and add it to `IMPLEMENTED_BLOCK_TAGS`.
@@ -325,7 +325,7 @@ const IMPLEMENTED_V2_BLOCK_TAGS: &[u8] = &[
     TAG_V2_CTA_DISPLAYID,        // 0x81
 ];
 
-/// DisplayID 2.x block tags that are defined by the specification but not yet
+/// DisplayID 2.x block tags that are defined by DisplayID 2.x but not yet
 /// decoded, plus tag ranges reserved or unassigned in the 2.x tag space.
 ///
 /// Each entry is an inclusive `(first, last)` range. When a new 2.x block type is

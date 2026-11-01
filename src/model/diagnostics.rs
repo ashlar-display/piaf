@@ -172,7 +172,7 @@ pub enum EdidWarning {
     /// reserved. The inner value is the raw 2-bit field. The block is skipped.
     #[error("DisplayID Transfer Characteristics block has reserved encoding byte: {0:#04x}")]
     UnknownTransferEncoding(u8),
-    /// A DisplayID 2.x data block carries a revision byte the spec marks as reserved.
+    /// A DisplayID 2.x data block carries a revision byte DisplayID 2.x marks as reserved.
     ///
     /// The block is parsed anyway with the fields defined for revision 0; consumers may
     /// see incorrect values if the revision actually changed the wire format.

@@ -11,7 +11,7 @@ pub const EDID_HEADER: [u8; 8] = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00
 
 /// Maximum number of extension blocks the parser will store and process.
 ///
-/// The EDID spec allows up to 255 extension blocks, but real displays have at most a handful.
+/// EDID allows up to 255 extension blocks, but real displays have at most a handful.
 /// Inputs claiming more than this limit are most likely malformed or hostile; the parser
 /// emits [`EdidWarning::ExtensionBlockLimitReached`] and ignores the excess blocks.
 pub const MAX_EXTENSION_BLOCKS: usize = 64;

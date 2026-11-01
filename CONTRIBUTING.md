@@ -101,8 +101,8 @@ make_model = "LG OLED42C4"
 panel = "42-inch OLED"                        # for a driver board: the panel actually behind it
 native_resolution = [3840, 2160]
 measured_size_mm = [924, 520]                 # the real active area
-size_source = "measured"                      # or "manufacturer spec"
-reference = "https://..."                     # where a spec value came from (spec sheet, database page)
+size_source = "measured"                      # or "manufacturer datasheet"
+reference = "https://..."                     # where a datasheet value came from (datasheet, database page)
 running_mode = "3840x2160 @ 144 Hz"           # what the OS actually drives
 
 [notes]

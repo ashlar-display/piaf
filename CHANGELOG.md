@@ -286,7 +286,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for computing rates from large intermediate products such as
   `pixel_clock_hz / (h_total × v_total)`.
 - **`CvtAlgorithm`** re-exported from `piaf` — CVT formula selector for Type IX
-  descriptors. `Reserved(u8)` for spec-reserved encodings.
+  descriptors. `Reserved(u8)` for reserved encodings.
 - **Type VII Detailed Timing decoder shared between DisplayID 2.x (`0x22`) and the CTA
   T7VTDB path** via `decode_type_vii_descriptor_to_mode`. The CTA wrapper remains parsed
   inline; the 20-byte body decodes through the shared function.
@@ -322,8 +322,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active/blank/front-porch/sync-width fields all stored as `value − 1`, with sync
   polarity in bit 15 of the H/V Front Porch words. The previous decoder treated
   byte 0 as options, bytes 1–2 as a 16-bit pixel clock, all subsequent fields
-  shifted by one byte, and byte 19 as a flags field — none of which matches the
-  spec. Type I has been rewritten to delegate to a shared
+  shifted by one byte, and byte 19 as a flags field — none of which matches
+  DisplayID. Type I has been rewritten to delegate to a shared
   `decode_type_1_7_descriptor_body(d, pixel_clock_unit_khz)` helper that Type VII
   also uses.
 - **DisplayID Type V (`0x11`), Type VII (`0x22`), Type IX (`0x24`) off-by-one** —
@@ -346,7 +346,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skipped" since the wire format cannot represent value 0.
 
   All items identified in the cross-check against `edid-decode` have since been
-  resolved: `CvtAlgorithm` enum reshaped to spec-correct variants (`Cvt`/`CvtRb`/`CvtR2`);
+  resolved: `CvtAlgorithm` enum reshaped to the correct variants (`Cvt`/`CvtRb`/`CvtR2`);
   Type IX/V byte 0 bit 3 decoded as `ntsc_fractional_refresh` (not bit 4, and not `y420`);
   Type IX/V bits 6:5 decoded as `TypeIxStereoMode`; Type VII byte 3 bit 7 decoded as
   `y420` (block revision ≥ 2).

@@ -58,8 +58,8 @@ piaf's previous output. The fixtures that existed before this convention have no
 |           | `panel`             | The panel; for a driver board, the panel behind it                              |
 |           | `native_resolution` | `[width, height]` in pixels                                                     |
 |           | `measured_size_mm`  | `[width, height]` of the active area                                            |
-|           | `size_source`       | `measured` or `manufacturer spec`                                               |
-|           | `reference`         | URL of the source for spec values, e.g. a spec sheet or a display database page |
+|           | `size_source`       | `measured` or `manufacturer datasheet`                                               |
+|           | `reference`         | URL of the source for datasheet values, e.g. a datasheet or a display database page |
 |           | `running_mode`      | What the OS actually drives                                                     |
 | `notes`   | `known_issues`      | List of what the EDID gets wrong or does oddly                                  |
 
