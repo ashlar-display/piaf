@@ -205,7 +205,7 @@ Trying to use one structure for both usually produces an API that is awkward for
 
 ## Fixed-capacity fields
 
-When a field has a fixed maximum size defined by the spec, it is represented with a
+When a field has a fixed maximum size defined by the standard, it is represented with a
 fixed-capacity type rather than a heap-allocated one. This makes the field available in
 all build configurations, including bare `no_std` without `alloc`.
 
@@ -240,7 +240,7 @@ lists are the exception: `StaticDisplayCapabilities<N>` provides a fixed-capacit
 `[Option<VideoMode>; N]` available at all build tiers.
 
 New fields should follow the fixed-capacity pattern where the bound is derivable from
-the spec.
+the standard.
 
 ## Error and warning model
 

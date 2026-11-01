@@ -100,7 +100,7 @@ impl ExtensionHandler for Cea861Handler {
         for (i, ext) in blocks.iter().enumerate() {
             let block = ctx.block_number(i);
             // Parse the data block collection: bytes 4 through dtd_offset-1.
-            // When dtd_offset == 0 the spec says no DTDs are present, so data blocks
+            // When dtd_offset == 0 CTA-861 says no DTDs are present, so data blocks
             // may fill the rest of the block (bytes 4–127).
             let dtd_offset = ext[2] as usize;
             let collection_end = if dtd_offset == 0 {
@@ -120,7 +120,7 @@ impl ExtensionHandler for Cea861Handler {
             }
 
             // Parse Detailed Timing Descriptors from byte dtd_offset through byte 126.
-            // When dtd_offset == 0 there are no DTDs (the spec says no timing data present).
+            // When dtd_offset == 0 there are no DTDs (CTA-861 says no timing data present).
             if (4..=110).contains(&dtd_offset) {
                 let mut offset = dtd_offset;
                 let mut dtd_index: u8 = 0;

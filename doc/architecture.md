@@ -29,7 +29,7 @@ The following are out of scope:
 
 ### Decoding philosophy
 
-PIAF decodes everything a specification defines. No field is omitted because it appears
+PIAF decodes everything a standard defines. No field is omitted because it appears
 obscure or unlikely to be needed. Consumers decide which fields matter for their use case;
 the library makes no judgement about importance.
 

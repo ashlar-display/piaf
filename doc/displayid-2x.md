@@ -89,7 +89,7 @@ Fields decoded into `DisplayCapabilities` and `DisplayIdCapabilities`:
 
 The block is fixed at 29 bytes; shorter payloads are silently skipped.
 
-Luminance fields use the IEEE 754 binary16 encoding. The spec reserves `−0` (`0x8000`)
+Luminance fields use the IEEE 754 binary16 encoding. DisplayID 2.x reserves `−0` (`0x8000`)
 as the "not used" sentinel; this decoder also treats `+0` (`0x0000`) as `None` because
 0 cd/m² is degenerate for any of the three luminance fields and is most likely an EDID
 writer that confused the sign bit. NaN and infinity decode to `None` as well.
@@ -252,7 +252,7 @@ them. Field-level conflicts resolve as follows:
 | Variant                                        | Meaning                                                                                                                                                   |
 |------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `DisplayIdVersionUnknown(u8)`                  | Version byte is outside the known ranges (0x10–0x1F, 0x20). The block is skipped.                                                                         |
-| `UnsupportedV2BlockRevision { tag, revision }` | A 2.x data block carries a revision byte the spec marks as reserved. The block is parsed anyway with the revision-0 wire format; values may be incorrect. |
+| `UnsupportedV2BlockRevision { tag, revision }` | A 2.x data block carries a revision byte DisplayID 2.x marks as reserved. The block is parsed anyway with the revision-0 wire format; values may be incorrect. |
 
 The section-level warnings (`DisplayIdExtensionCountMismatch`,
 `DisplayIdChecksumMismatch`, `DisplayIdSectionBytesOutOfRange`) are shared with 1.x —

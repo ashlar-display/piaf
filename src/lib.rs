@@ -7,7 +7,7 @@
 //!
 //! # Decoding philosophy
 //!
-//! PIAF decodes everything a specification defines. No field is omitted because it appears
+//! PIAF decodes everything a standard defines. No field is omitted because it appears
 //! obscure or unlikely to be needed — that judgement belongs to the consumer. [`Option`]
 //! fields communicate presence or absence in the source data, not relative importance.
 //!

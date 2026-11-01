@@ -1,6 +1,6 @@
 # CEA-861 / CTA-861 Extended Tag Codes
 
-Source: CTA-861-H Table 62 (confirmed against actual spec PDF).
+Source: CTA-861-H Table 62 (confirmed against the published CTA-861-H).
 
 Extended tag data blocks use outer CTA tag `0x07`, with the first payload byte as the extended tag code. Max 30 payload bytes (after the outer length byte).
 
@@ -12,7 +12,7 @@ Extended tag data blocks use outer CTA tag `0x07`, with the first payload byte a
 | `0x01` | Vendor-Specific Video Data Block (VSVDB) | ✓ implemented (`VendorSpecificBlock`) |
 | `0x02` | VESA Display Device Data Block (DDDB) | ✓ implemented |
 | `0x03` | Reserved for VESA Video Data Block (VTB-EXT) | ✓ implemented |
-| `0x04` | Reserved for HDMI Video Data Block (HDMI Forum spec) | — reserved, no public structure |
+| `0x04` | Reserved for HDMI Video Data Block (HDMI Forum) | — reserved, no public structure |
 | `0x05` | Colorimetry Data Block (CDB) | ✓ implemented |
 | `0x06` | HDR Static Metadata Data Block | ✓ implemented |
 | `0x07` | HDR Dynamic Metadata Data Block | ✓ implemented |
@@ -102,8 +102,7 @@ containing a `Vec<T10VtdbEntry>`. M > 2 is invalid and returns `None`.
 
 ### HDMI Forum EDID Extension Override Data Block (`0x78`)
 
-Source: HDMI 2.1 section 10.3.6 (structure reconstructed from Linux kernel `drm_edid.c`
-and edid-decode; the full HDMI Forum spec requires membership).
+Source: structure reconstructed from Linux kernel `drm_edid.c` and edid-decode.
 
 ```
 Byte 1:  Tag Code (0x07) | Length = 2
@@ -118,8 +117,8 @@ exceeds what the base EDID byte can represent. Exposed as
 
 ### HDMI Forum Sink Capability Data Block (`0x79`)
 
-Source: HDMI 2.1a section 10.3.6 (structure reconstructed from Linux kernel `drm_edid.c`,
-edid-decode, and libdisplay-info).
+Source: structure reconstructed from Linux kernel `drm_edid.c`, edid-decode, and
+libdisplay-info.
 
 ```
 Byte 1:  Tag Code (0x07) | Length

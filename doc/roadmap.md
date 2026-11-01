@@ -9,7 +9,7 @@ The remaining gap in 2.x coverage:
 - **Type IX (`0x24`) standard CVT evaluator** — descriptors with algorithm code `0`
   (`CvtAlgorithm::Cvt`) pass through with only `(width, height, refresh_rate, cvt_algorithm)`
   set; no pixel clock or blanking parameters are derived. Standard CVT (non-reduced-blanking)
-  is a distinct VESA algorithm requiring the full CVT spec formulae; deferred until a
+  is a distinct VESA algorithm requiring the full VESA CVT formulae; deferred until a
   real-world fixture is available to validate the implementation.
 
 ### Consistency validation

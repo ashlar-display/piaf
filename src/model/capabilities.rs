@@ -147,7 +147,7 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     pub manufacturer: Option<ManufacturerId>,
     /// Manufacture date or model year, decoded from bytes 16–17.
     pub manufacture_date: Option<crate::model::manufacture::ManufactureDate>,
-    /// EDID specification version and revision, decoded from bytes 18–19.
+    /// EDID version and revision, decoded from bytes 18–19.
     pub edid_version: Option<crate::model::edid::EdidVersion>,
     /// Manufacturer-assigned product code.
     pub product_code: Option<u16>,
