@@ -1,6 +1,8 @@
 use crate::model::capabilities::DisplayCapabilities;
 #[cfg(not(any(feature = "alloc", feature = "std")))]
 use crate::model::capabilities::ModeSink;
+#[cfg(not(any(feature = "alloc", feature = "std")))]
+use crate::model::capabilities::VideoMode;
 use crate::model::diagnostics::EdidWarning;
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::model::diagnostics::ParseWarning;
@@ -30,18 +32,20 @@ pub(crate) use header::{decode_color_bit_depth, decode_manufacture_date};
 /// Decodes all mode-producing sections of the base block into `sink`.
 ///
 /// Covers established timings, standard timings, detailed timings (sink-based,
-/// no `preferred_image_size_mm`), and mode-producing descriptor types.
+/// no `preferred_image_size_mm`), and mode-producing descriptor types. Returns the
+/// preferred timing, decoded once with the mode list.
 /// Called by `capabilities_from_edid_static` in bare `no_std` builds.
 #[cfg(not(any(feature = "alloc", feature = "std")))]
 pub(super) fn decode_base_modes(
     base: &[u8; 128],
     sink: &mut dyn ModeSink,
     options: &DecodeOptions,
-) {
+) -> Option<VideoMode> {
     timings::decode_established_timings(base, sink);
     timings::decode_standard_timings(base, sink);
-    timings::decode_detailed_timings(base, sink, options);
+    let preferred = timings::decode_detailed_timings(base, sink, options);
     descriptors::decode_descriptors_modes(base, sink);
+    preferred
 }
 
 #[cfg(not(any(feature = "alloc", feature = "std")))]

@@ -263,12 +263,19 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     pub max_h_rate_khz: Option<u16>,
     /// Maximum pixel clock in MHz.
     pub max_pixel_clock_mhz: Option<u16>,
-    /// Physical image area dimensions in millimetres `(width_mm, height_mm)`, decoded from
-    /// the first detailed timing descriptor that provides non-zero values (bytes 12–14).
+    /// Image size of the preferred timing, in millimetres `(width_mm, height_mm)`: the size
+    /// in the descriptor that [`preferred_timing`][Self::preferred_timing] is decoded from.
     ///
     /// More precise than [`screen_size`][Self::screen_size] (which is in cm from the base
-    /// block header). `None` when all DTD image-size fields are zero.
+    /// block header). `None` when the EDID has no preferred timing or that descriptor gives
+    /// no size (either axis 0). As [`DisplayCapabilities::preferred_image_size_mm`].
     pub preferred_image_size_mm: Option<(u16, u16)>,
+    /// The preferred timing: the base block's first timing descriptor, with its full
+    /// timing. EDID 1.4 and later always have one; EDID 1.3 and earlier only with the
+    /// preferred-timing feature bit set. As [`DisplayCapabilities::preferred_timing`].
+    ///
+    /// Set even when [`supported_modes`][Self::supported_modes] is full.
+    pub preferred_timing: Option<VideoMode>,
     /// Video timing formula reported in the display range limits descriptor (`0xFD`), byte 10.
     pub timing_formula: Option<crate::model::timing::TimingFormula>,
     /// DCM polynomial coefficients decoded from a Color Management Data descriptor (`0xF9`).
@@ -335,6 +342,7 @@ impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
             max_h_rate_khz: None,
             max_pixel_clock_mhz: None,
             preferred_image_size_mm: None,
+            preferred_timing: None,
             timing_formula: None,
             color_management: None,
             // `Option<VideoMode>` is not `Copy` so array repeat syntax is unavailable;

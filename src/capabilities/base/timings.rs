@@ -278,7 +278,7 @@ pub(crate) fn decode_dtd_slot(
 /// Decodes a single 18-byte Detailed Timing Descriptor slice into a [`ModeSink`].
 ///
 /// Like [`decode_dtd_slot`] but writes into any [`ModeSink`] rather than directly into
-/// [`DisplayCapabilities`].
+/// [`DisplayCapabilities`]. Returns the decoded mode, as `decode_dtd_slot` does.
 ///
 /// This is `pub(crate)` so that the CEA-861 handler can use it for DTDs in extension blocks
 /// in no-alloc builds.
@@ -288,13 +288,20 @@ pub(crate) fn decode_dtd_slot_into_sink(
     block: Option<u8>,
     dtd_index: u8,
     options: &DecodeOptions,
-) {
+) -> Option<VideoMode> {
     match build_dtd_mode(dtd, options.dtd_border_policy, &mut |w| {
         sink.push_warning(w)
     }) {
-        Err(w) => sink.push_warning(w),
-        Ok(None) => {}
-        Ok(Some(mode)) => sink.push_mode(with_dtd_source(mode, block, dtd_index)),
+        Err(w) => {
+            sink.push_warning(w);
+            None
+        }
+        Ok(None) => None,
+        Ok(Some(mode)) => {
+            let mode = with_dtd_source(mode, block, dtd_index);
+            sink.push_mode(mode.clone());
+            Some(mode)
+        }
     }
 }
 
@@ -342,21 +349,30 @@ pub(super) fn preferred_image_size_mm(base: &[u8; 128]) -> Option<(u16, u16)> {
 
 /// Decodes the four detailed timing descriptor (DTD) slots (offsets 0x36, 0x48, 0x5A, 0x6C).
 /// Slots with a zero pixel clock are monitor descriptors and are skipped here.
-// Called by capabilities_from_edid_static (step 6). The alloc BaseBlockHandler uses
-// decode_dtd_slot directly to preserve upgrade-in-place semantics.
+///
+/// Returns the preferred timing (the first timing descriptor, when the EDID has one), decoded
+/// once for both the mode list and the caller.
+// Called by capabilities_from_edid_static in bare no_std builds. The alloc BaseBlockHandler
+// uses decode_dtd_slot directly to preserve upgrade-in-place semantics.
 #[allow(dead_code)]
 pub(super) fn decode_detailed_timings(
     base: &[u8; 128],
     sink: &mut dyn ModeSink,
     options: &DecodeOptions,
-) {
+) -> Option<VideoMode> {
+    let has_preferred = has_preferred_timing(base);
+    let mut preferred = None;
     let mut index = 0u8;
     for slot in base[0x36..0x7E].chunks_exact(18) {
-        decode_dtd_slot_into_sink(slot, sink, Some(0), index, options);
+        let decoded = decode_dtd_slot_into_sink(slot, sink, Some(0), index, options);
         if is_timing_descriptor(slot) {
+            if index == 0 && has_preferred {
+                preferred = decoded;
+            }
             index += 1;
         }
     }
+    preferred
 }
 
 /// Whether an 18-byte descriptor slot holds a timing (non-zero pixel clock), not a display

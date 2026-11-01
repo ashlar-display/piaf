@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Dtd { block: 0, index: 0 }`. EDID 1.4 and later always have one; EDID 1.3 and earlier
   only with the preferred-timing feature bit set, as edid-decode, libdisplay-info and
   Linux's DRM read it. Extension blocks never fill it. It replaces searching
-  `supported_modes` for that source.
+  `supported_modes` for that source. `StaticDisplayCapabilities::preferred_timing` carries
+  it in no-alloc builds, set even when the mode list is full.
 
 ### Changed
 

@@ -255,6 +255,8 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
     caps.max_h_rate_khz = base_caps.max_h_rate_khz;
     caps.max_pixel_clock_mhz = base_caps.max_pixel_clock_mhz;
     caps.preferred_image_size_mm = base_caps.preferred_image_size_mm;
+    // Set by BaseBlockHandler with alloc; in bare no_std builds by decode_base_modes (step 3).
+    caps.preferred_timing = base_caps.preferred_timing;
     caps.timing_formula = base_caps.timing_formula;
     caps.color_management = base_caps.color_management;
 
@@ -270,7 +272,7 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
     #[cfg(not(any(feature = "alloc", feature = "std")))]
     {
         // No supported_modes in bare no_std DisplayCapabilities; call ungated functions directly.
-        base::decode_base_modes(parsed.base_block(), &mut caps, &options);
+        caps.preferred_timing = base::decode_base_modes(parsed.base_block(), &mut caps, &options);
     }
 
     // Step 4 — Dispatch extension blocks to the static handler slice.
@@ -722,6 +724,61 @@ mod static_tests {
             (1920, 2, Some(ModeSource::Dtd { block: 0, index: 0 })),
             (2560, 2, Some(ModeSource::Dtd { block: 1, index: 1 })),
         ]));
+    }
+
+    fn with_checksums(mut bytes: [u8; 256]) -> [u8; 256] {
+        for block in bytes.chunks_exact_mut(128) {
+            let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            block[127] = 0u8.wrapping_sub(sum);
+        }
+        bytes
+    }
+
+    // The preferred timing in the static pipeline: these run in every build, bare `no_std`
+    // included, where it comes from `decode_base_modes` rather than `BaseBlockHandler`.
+
+    #[test]
+    fn test_static_pipeline_sets_the_preferred_timing() {
+        let bytes = edid_with_repeated_preferred_dtd();
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        let preferred = caps.preferred_timing.as_ref().unwrap();
+        assert_eq!((preferred.width, preferred.h_border), (1920, 2));
+        assert_eq!(
+            preferred.source,
+            Some(ModeSource::Dtd { block: 0, index: 0 })
+        );
+        assert!(caps.iter_modes().any(|m| m == preferred));
+        // Its border warning is reported once, not once per use.
+        assert_eq!(ambiguous_warnings(&caps), 1);
+    }
+
+    #[test]
+    fn test_static_pipeline_no_preferred_timing_in_edid_1_3_without_the_bit() {
+        let mut bytes = edid_with_repeated_preferred_dtd();
+        bytes[0x13] = 3;
+        bytes[0x36 + 12..0x36 + 15].copy_from_slice(&[0x3F, 0x43, 0x21]); // 575 × 323 mm
+        let bytes = with_checksums(bytes);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        assert_eq!(caps.preferred_timing, None);
+        assert_eq!(caps.preferred_image_size_mm, None);
+        assert!(caps.iter_modes().any(|m| m.width == 1920)); // still decoded as a mode
+    }
+
+    #[test]
+    fn test_static_pipeline_keeps_the_preferred_timing_when_the_mode_list_is_full() {
+        let mut bytes = edid_with_repeated_preferred_dtd();
+        bytes[0x23] = 0b0000_0001; // established 800×600 @ 60 Hz, decoded before the DTD
+        let bytes = with_checksums(bytes);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<1, _>(&parsed, &[]);
+
+        assert_eq!(caps.num_modes, 1);
+        assert!(caps.iter_modes().all(|m| m.width == 800));
+        assert_eq!(caps.preferred_timing.map(|m| m.width), Some(1920));
     }
 
     /// Runs in every build, bare `no_std` included, where the base block's modes go
