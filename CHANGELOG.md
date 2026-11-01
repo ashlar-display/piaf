@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but a zero active area or blanking, with the raw values. Such a descriptor was skipped
   without a warning; when it is the preferred timing, `preferred_timing` is `None` and this
   warning says why.
+- Both new struct variants (`PreferredTimingNotInFirstSlot`, `DtdGeometryInvalid`) are
+  `#[non_exhaustive]`, as plumbob's and culvert's are, so a field can be added later
+  without a breaking release: match them with `..`; code outside piaf cannot construct
+  them. The older struct variants follow at piaf's next breaking release.
 
 ### Changed
 
