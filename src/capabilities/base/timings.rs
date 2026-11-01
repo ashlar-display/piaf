@@ -74,9 +74,10 @@ pub(super) fn decode_standard_timings(base: &[u8; 128], sink: &mut dyn ModeSink)
 /// [`EdidWarning::DtdBlankingInconsistent`]) go to `warn`; the mode is still returned.
 ///
 /// Returns:
-/// - `Ok(None)` — monitor descriptor (zero pixel clock) or undecodable geometry
+/// - `Ok(None)` — monitor descriptor (zero pixel clock)
 /// - `Ok(Some(mode))` — valid timing
-/// - `Err(w)` — [`EdidWarning::DtdSlotTooShort`] or [`EdidWarning::DtdPixelClockOverflow`]
+/// - `Err(w)` — [`EdidWarning::DtdSlotTooShort`], [`EdidWarning::DtdPixelClockOverflow`] or
+///   [`EdidWarning::DtdGeometryInvalid`]
 pub(crate) fn build_dtd_mode(
     dtd: &[u8],
     policy: DtdBorderPolicy,
@@ -99,7 +100,12 @@ pub(crate) fn build_dtd_mode(
     let vblank = (((dtd[7] as u16) & 0x0F) << 8) | (dtd[6] as u16);
 
     if hactive == 0 || vactive == 0 || hblank == 0 || vblank == 0 {
-        return Ok(None);
+        return Err(EdidWarning::DtdGeometryInvalid {
+            h_active: hactive,
+            h_blank: hblank,
+            v_active: vactive,
+            v_blank: vblank,
+        });
     }
 
     // Border (bytes 15–16): pixels/lines on each side of the active area.
@@ -773,6 +779,32 @@ mod tests {
         );
         // The same mode as in the list.
         assert_eq!(caps.supported_modes, core::slice::from_ref(preferred));
+    }
+
+    #[test]
+    fn test_undecodable_preferred_timing_is_reported() {
+        let mut base = base_with_bordered_1080p(0, 0);
+        base[0x13] = 4;
+        base[0x36 + 12..0x36 + 15].copy_from_slice(&[0x0F, 0x28, 0x21]); // 527 × 296 mm
+        base[0x38] = 0; // H active 0 (low byte) …
+        base[0x3A] &= 0x0F; // … and high nibble
+        let caps = decode_base(&base);
+
+        assert_eq!(caps.preferred_timing, None);
+        assert_eq!(caps.preferred_image_size_mm, Some((527, 296)));
+        let warnings: Vec<_> = caps
+            .iter_warnings()
+            .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
+            .collect();
+        assert_eq!(
+            warnings,
+            [EdidWarning::DtdGeometryInvalid {
+                h_active: 0,
+                h_blank: 280,
+                v_active: 1080,
+                v_blank: 45
+            }]
+        );
     }
 
     #[test]

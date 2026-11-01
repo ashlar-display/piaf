@@ -93,6 +93,25 @@ pub enum EdidWarning {
         /// Horizontal sync pulse width, in pixels.
         h_sync_width: u16,
     },
+    /// A Detailed Timing Descriptor slot was skipped because it has a pixel clock (so it
+    /// is a timing, not a display descriptor) but a zero active area or blanking, which no
+    /// timing can have. The raw values are kept.
+    ///
+    /// If it is the preferred timing, `preferred_timing` is `None` while
+    /// `preferred_image_size_mm` may still hold the descriptor's size.
+    #[error(
+        "DTD slot skipped: active {h_active}×{v_active} with blanking {h_blank}×{v_blank} cannot be a timing"
+    )]
+    DtdGeometryInvalid {
+        /// Horizontal active pixels as stored.
+        h_active: u16,
+        /// Horizontal blanking as stored, in pixels.
+        h_blank: u16,
+        /// Vertical active lines as stored.
+        v_active: u16,
+        /// Vertical blanking as stored, in lines.
+        v_blank: u16,
+    },
     /// The EDID has a preferred timing, but the base block's first descriptor slot does not
     /// hold a timing (edid-decode and libdisplay-info both flag this).
     ///

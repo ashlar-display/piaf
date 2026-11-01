@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not a timing (edid-decode and libdisplay-info both flag it; `timing_slot` is where the
   first timing is, `None` for none), and `EdidWarning::PreferredTimingBitClear` for an
   EDID 1.3 base block without the preferred-timing feature bit (as edid-decode flags it).
+- **`EdidWarning::DtdGeometryInvalid`** for a Detailed Timing Descriptor with a pixel clock
+  but a zero active area or blanking, with the raw values. Such a descriptor was skipped
+  without a warning; when it is the preferred timing, `preferred_timing` is `None` and this
+  warning says why.
 
 ### Changed
 

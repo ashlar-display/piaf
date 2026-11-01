@@ -826,6 +826,26 @@ mod static_tests {
     }
 
     #[test]
+    fn test_static_pipeline_reports_an_undecodable_preferred_timing() {
+        let mut bytes = base_with_timing_in(4, 0, Some(0));
+        bytes[0x3B] = 0; // V active 0 (low byte) …
+        bytes[0x3D] &= 0x0F; // … and high nibble
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        assert_eq!(caps.preferred_timing, None);
+        let expected = EdidWarning::DtdGeometryInvalid {
+            h_active: 1920,
+            h_blank: 280,
+            v_active: 0,
+            v_blank: 45,
+        };
+        assert_eq!(caps.iter_warnings().filter(|w| **w == expected).count(), 1);
+    }
+
+    #[test]
     fn test_warns_when_the_preferred_timing_is_not_in_slot_0() {
         let (found, n) = preferred_timing_warnings(&base_with_timing_in(4, 0, Some(1)));
         assert_eq!(n, 1);
