@@ -95,12 +95,19 @@ impl ExtensionHandler for BaseBlockHandler {
         timings::decode_established_timings(base, caps);
         timings::decode_standard_timings(base, caps);
         caps.preferred_image_size_mm = timings::preferred_image_size_mm(base);
+        // The preferred timing is the first timing descriptor, decoded once for both the
+        // field and the mode list (so its warnings are reported once).
+        let has_preferred = timings::has_preferred_timing(base);
+        caps.preferred_timing = None;
         // Use decode_dtd_slot (not decode_detailed_timings) to preserve upgrade-in-place
         // semantics.
         let mut index = 0u8;
         for slot in base[0x36..0x7E].chunks_exact(18) {
-            timings::decode_dtd_slot(slot, caps, Some(0), index, options);
+            let decoded = timings::decode_dtd_slot(slot, caps, Some(0), index, options);
             if timings::is_timing_descriptor(slot) {
+                if index == 0 && has_preferred {
+                    caps.preferred_timing = decoded;
+                }
                 index += 1;
             }
         }

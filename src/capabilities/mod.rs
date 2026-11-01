@@ -677,6 +677,7 @@ mod static_tests {
     pub(super) fn edid_with_repeated_preferred_dtd() -> [u8; 256] {
         let mut bytes = [0u8; 256];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12..0x14].copy_from_slice(&[1, 4]); // EDID 1.4: base DTD 0 is preferred
         let preferred = bordered_dtd(14850, (1920, 280), (1080, 45), 88, 44);
         bytes[0x36..0x48].copy_from_slice(&preferred);
         bytes[126] = 1;
@@ -780,6 +781,43 @@ mod static_tests {
                 .collect();
             assert_eq!(sources, [first_dtd]);
         }
+    }
+
+    /// PinReady's DMD panel: 1280×800 in the base block, 1280×720 in the CTA block. Only
+    /// the base block's timing is the preferred timing, and no extension DTD stands in for
+    /// a missing one.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    #[test]
+    fn test_preferred_timing_comes_from_the_base_block_only() {
+        let mut bytes = [0u8; 256];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12..0x14].copy_from_slice(&[1, 3]);
+        bytes[0x18] = 0x0A; // preferred-timing bit set
+        bytes[0x36..0x48].copy_from_slice(&bordered_dtd(7100, (1280, 160), (800, 23), 48, 32));
+        bytes[0x36 + 15] = 0;
+        bytes[126] = 1;
+        bytes[128..132].copy_from_slice(&[0x02, 0x03, 4, 0]); // DTDs from byte 4
+        bytes[132..150].copy_from_slice(&bordered_dtd(7425, (1280, 370), (720, 30), 110, 40));
+        bytes[132 + 15] = 0;
+        let checksum = |bytes: &mut [u8; 256]| {
+            for block in bytes.chunks_exact_mut(128) {
+                let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+                block[127] = 0u8.wrapping_sub(sum);
+            }
+        };
+        checksum(&mut bytes);
+        let library = ExtensionLibrary::with_standard_handlers();
+        let decode =
+            |bytes: &[u8]| capabilities_from_edid(&parse_edid(bytes, &library).unwrap(), &library);
+
+        let preferred = decode(&bytes).preferred_timing.unwrap();
+        assert_eq!((preferred.width, preferred.height), (1280, 800));
+
+        bytes[0x36..0x48].fill(0); // no base timing: the CTA DTD does not stand in
+        checksum(&mut bytes);
+        let caps = decode(&bytes);
+        assert_eq!(caps.preferred_timing, None);
+        assert!(caps.supported_modes.iter().any(|m| m.height == 720));
     }
 
     // VTB-EXT is decoded in alloc builds only.

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The preferred timing, `DisplayCapabilities::preferred_timing`** (display-types
+  0.5.1): the base block's first timing descriptor, with its full timing and source
+  `Dtd { block: 0, index: 0 }`. EDID 1.4 and later always have one; EDID 1.3 and earlier
+  only with the preferred-timing feature bit set, as edid-decode, libdisplay-info and
+  Linux's DRM read it. Extension blocks never fill it. It replaces searching
+  `supported_modes` for that source.
+
+### Changed
+
+- **`preferred_image_size_mm` follows the same rule**: the size in the preferred
+  timing's descriptor, `None` when the EDID has no preferred timing. It was slot 0's size
+  whatever the version and feature bit, and `None` when slot 0 held a display descriptor
+  even though a later timing was the preferred one. Values change only for EDID 1.3 and
+  earlier without the feature bit, and for that layout.
+
 ### Fixed
 
 - **No-alloc builds discarded DTD timings that repeated an earlier mode.**
