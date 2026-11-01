@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`EdidWarning::PreferredImageSizeShapeMismatch`** when the preferred timing's image
+  size does not have the shape of its pixels: one side kept, the other derived from the
+  active pixels (frame lines when interlaced), more than 10 mm off; not checked below
+  100 × 100 mm (edid-decode's check and tolerance). It carries the declared and the
+  matching size; whether the pixels are non-square or the size is wrong is the caller's
+  call.
 - **`ModeSource` is re-exported at the crate root** (`piaf::ModeSource`), next to
   `VideoMode`, whose `source` field uses it; it was reachable only as
   `piaf::model::capabilities::ModeSource`.

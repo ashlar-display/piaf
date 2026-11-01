@@ -125,6 +125,26 @@ pub enum EdidWarning {
         /// timing; `None` when the base block holds no timing descriptor.
         timing_slot: Option<u8>,
     },
+    /// The preferred timing's image size does not have the shape of its pixels: the size
+    /// expected from one side and the pixel aspect ratio differs from the other side by
+    /// more than 10 mm (edid-decode's check and tolerance). Not checked below 100 × 100 mm.
+    ///
+    /// Carries the declared size and the size that would match the pixels; which is right
+    /// (non-square pixels, or a wrong size) is the caller's call.
+    #[non_exhaustive]
+    #[error(
+        "preferred timing's image size {width_mm}×{height_mm} mm does not match its pixel shape (expected {expected_width_mm}×{expected_height_mm} mm)"
+    )]
+    PreferredImageSizeShapeMismatch {
+        /// Declared image width, in millimetres.
+        width_mm: u16,
+        /// Declared image height, in millimetres.
+        height_mm: u16,
+        /// Width matching the pixel aspect ratio, in millimetres (one side is kept).
+        expected_width_mm: u32,
+        /// Height matching the pixel aspect ratio, in millimetres (one side is kept).
+        expected_height_mm: u32,
+    },
     /// An EDID 1.3 base block has the preferred-timing feature bit (byte `0x18`, bit 1)
     /// clear, which EDID 1.3 requires to be set (edid-decode flags this).
     ///

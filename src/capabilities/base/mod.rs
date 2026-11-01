@@ -48,6 +48,17 @@ pub(super) fn decode_base_modes(
     preferred
 }
 
+/// The preferred timing's image-shape warning, if any; see
+/// `timings::preferred_image_shape_warning`. Used by the bare `no_std` static pipeline,
+/// after the base block's modes.
+#[cfg(not(any(feature = "alloc", feature = "std")))]
+pub(super) fn preferred_image_shape_warning(
+    mode: &VideoMode,
+    size: (u16, u16),
+) -> Option<EdidWarning> {
+    timings::preferred_image_shape_warning(mode, size)
+}
+
 #[cfg(not(any(feature = "alloc", feature = "std")))]
 pub(super) fn decode_base_block(
     base: &[u8; 128],
@@ -118,6 +129,12 @@ impl ExtensionHandler for BaseBlockHandler {
                     caps.preferred_timing = decoded;
                 }
                 index += 1;
+            }
+        }
+        // After the DTDs' warnings, as in bare `no_std` builds.
+        if let (Some(mode), Some(size)) = (&caps.preferred_timing, caps.preferred_image_size_mm) {
+            if let Some(w) = timings::preferred_image_shape_warning(mode, size) {
+                caps.push_warning(w);
             }
         }
     }

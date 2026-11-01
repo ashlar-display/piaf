@@ -276,6 +276,12 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
     {
         // No supported_modes in bare no_std DisplayCapabilities; call ungated functions directly.
         caps.preferred_timing = base::decode_base_modes(parsed.base_block(), &mut caps, &options);
+        // After the DTDs' warnings, as BaseBlockHandler reports it with `alloc`.
+        if let (Some(mode), Some(size)) = (&caps.preferred_timing, caps.preferred_image_size_mm) {
+            if let Some(w) = base::preferred_image_shape_warning(mode, size) {
+                caps.push_warning(w);
+            }
+        }
     }
 
     // Step 4 — Dispatch extension blocks to the static handler slice.
@@ -870,6 +876,30 @@ mod static_tests {
                 EdidWarning::DtdBordersAmbiguous {
                     h_border: 2,
                     v_border: 0
+                },
+            ]
+        );
+    }
+
+    /// Runs in every build: the shape warning comes after the DTDs' warnings.
+    #[test]
+    fn test_static_pipeline_reports_an_image_size_of_the_wrong_shape() {
+        let mut bytes = base_with_timing_in(4, 0, Some(0));
+        bytes[0x36 + 12..0x36 + 15].copy_from_slice(&[0x0F, 0x90, 0x21]); // 527 × 400 mm
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        assert_eq!(
+            caps.warnings(),
+            [
+                EdidWarning::InvalidManufacturerId,
+                EdidWarning::PreferredImageSizeShapeMismatch {
+                    width_mm: 527,
+                    height_mm: 400,
+                    expected_width_mm: 527,
+                    expected_height_mm: 296,
                 },
             ]
         );

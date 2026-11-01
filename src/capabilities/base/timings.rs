@@ -345,6 +345,50 @@ pub(super) fn preferred_timing_warnings(base: &[u8; 128], warn: &mut dyn FnMut(E
     }
 }
 
+/// [`EdidWarning::PreferredImageSizeShapeMismatch`] when the preferred timing's image size
+/// does not have the shape of its pixels, as edid-decode checks it: sizes under
+/// 100 × 100 mm are skipped, the expected size keeps one side and derives the other from
+/// the active pixels (frame lines for an interlaced timing), and a difference over 10 mm
+/// is reported.
+pub(super) fn preferred_image_shape_warning(
+    mode: &VideoMode,
+    (width_mm, height_mm): (u16, u16),
+) -> Option<EdidWarning> {
+    let (w_mm, h_mm) = (u32::from(width_mm), u32::from(height_mm));
+    if w_mm < 100 || h_mm < 100 {
+        return None;
+    }
+    let h_act = u32::from(mode.width);
+    let v_act = u32::from(mode.height) * if mode.interlaced { 2 } else { 1 };
+    let d = gcd(h_act, v_act);
+    if d == 0 {
+        return None;
+    }
+    let (h_ratio, v_ratio) = (h_act / d, v_act / d);
+    let v_expected = w_mm * v_ratio / h_ratio;
+    let h_expected = h_mm * h_ratio / v_ratio;
+    let off = |expected: u32, declared: u32| expected + 10 < declared || expected > declared + 10;
+    let (expected_width_mm, expected_height_mm) =
+        if v_expected > h_mm + 10 && h_expected < w_mm + 10 {
+            off(h_expected, w_mm).then_some((h_expected, h_mm))?
+        } else {
+            off(v_expected, h_mm).then_some((w_mm, v_expected))?
+        };
+    Some(EdidWarning::PreferredImageSizeShapeMismatch {
+        width_mm,
+        height_mm,
+        expected_width_mm,
+        expected_height_mm,
+    })
+}
+
+const fn gcd(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
 /// The descriptor slot of the preferred timing: the base block's first timing descriptor,
 /// wherever it sits. `None` when the EDID has no preferred timing
 /// ([`has_preferred_timing`]) or the base block holds no timing descriptor.
@@ -805,6 +849,44 @@ mod tests {
                 v_blank: 45
             }]
         );
+    }
+
+    fn shape_warning(w: u16, h: u16, interlaced: bool, mm: (u16, u16)) -> Option<(u32, u32)> {
+        let mode = VideoMode::new(w, h, 60u32, interlaced);
+        super::preferred_image_shape_warning(&mode, mm).map(|w| match w {
+            EdidWarning::PreferredImageSizeShapeMismatch {
+                expected_width_mm,
+                expected_height_mm,
+                ..
+            } => (expected_width_mm, expected_height_mm),
+            other => panic!("unexpected {other:?}"),
+        })
+    }
+
+    #[test]
+    fn test_image_shape_matches_the_pixels() {
+        assert_eq!(shape_warning(1920, 1080, false, (527, 296)), None);
+        assert_eq!(shape_warning(3840, 2160, false, (941, 529)), None);
+        // Interlaced: the frame (2 × 540 lines) has the shape, not the field.
+        assert_eq!(shape_warning(1920, 540, true, (527, 296)), None);
+    }
+
+    #[test]
+    fn test_image_shape_mismatch_keeps_one_side() {
+        // PinReady's DMD panel: a 16:10 preferred timing on a 16:9 image area.
+        assert_eq!(
+            shape_warning(1280, 800, false, (575, 323)),
+            Some((516, 323))
+        );
+        assert_eq!(
+            shape_warning(1920, 1080, false, (527, 400)),
+            Some((527, 296))
+        );
+    }
+
+    #[test]
+    fn test_image_shape_not_checked_below_100_mm() {
+        assert_eq!(shape_warning(1920, 1080, false, (99, 400)), None);
     }
 
     #[test]
