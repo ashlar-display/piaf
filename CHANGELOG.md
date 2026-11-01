@@ -41,7 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after a matching established, standard or VIC entry (base block in bare `no_std`
   builds, the CTA block's DTDs in every build) was dropped with its pixel clock, blanking
   and source. A DTD now replaces such an entry, as `DisplayCapabilities` does; an earlier
-  DTD's entry is kept.
+  DTD's entry is kept. The entry's source changes with it: a mode that was
+  `ModeSource::Vic(n)` in `StaticDisplayCapabilities` is now `ModeSource::Dtd { .. }` when a
+  DTD repeats it (established and standard timings had no source). The no-alloc output
+  keeps no other record of that VIC; `DisplayCapabilities` has always behaved this way, with
+  the VIC still in `Cea861Capabilities::vics`. Code that matched on `Vic` for such a mode no
+  longer finds it.
 - **`ModeSource::Dtd { index }` counted descriptor slots, not timing descriptors.** A
   display descriptor before a timing (base block or CTA block) shifted the timing's
   index, so the base block's first timing could be `index: 1`. The index now counts timing
