@@ -364,3 +364,95 @@ fn static_pipeline_keeps_parse_warnings() {
         capabilities_from_edid_static(&owned, STANDARD_HANDLERS);
     assert_eq!(caps.warnings(), PARSE_THEN_BASE_WARNINGS);
 }
+
+// --- A DTD takes over a matching identity-only entry, as in the alloc pipeline ---
+
+/// A 1920×1080 @ 60 Hz Detailed Timing Descriptor (148.5 MHz, CTA VIC 16 timing).
+const DTD_1080P60: [u8; 18] = [
+    0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0x00, 0, 0, 0, 0, 0, 0x1E,
+];
+
+fn fix_checksums(bytes: &mut [u8]) {
+    for block in bytes.chunks_exact_mut(128) {
+        let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        block[127] = 0u8.wrapping_sub(sum);
+    }
+}
+
+/// The 1920×1080 @ 60 Hz entries of the static pipeline's mode list.
+fn static_1080p60_entries(bytes: &[u8]) -> Vec<piaf::VideoMode> {
+    let parsed = parse_edid(bytes, &ExtensionTagRegistry::new()).unwrap();
+    let caps: StaticDisplayCapabilities<16> =
+        capabilities_from_edid_static(&parsed, STANDARD_HANDLERS);
+    caps.iter_modes()
+        .filter(|m| {
+            m.width == 1920 && m.height == 1080 && m.refresh_rate == Some(RefreshRate::integral(60))
+        })
+        .cloned()
+        .collect()
+}
+
+/// The same mode list from both pipelines, compared in full (sorted by identity).
+fn assert_same_modes_as_alloc(bytes: &[u8]) {
+    let library = ExtensionLibrary::with_standard_handlers();
+    let alloc_caps = capabilities_from_edid(&parse_edid(bytes, &library).unwrap(), &library);
+    let parsed = parse_edid(bytes, &ExtensionTagRegistry::new()).unwrap();
+    let static_caps: StaticDisplayCapabilities<16> =
+        capabilities_from_edid_static(&parsed, STANDARD_HANDLERS);
+    let key = |m: &&piaf::VideoMode| (m.width, m.height, m.refresh_rate, m.interlaced);
+    let mut alloc_modes: Vec<_> = alloc_caps.supported_modes.iter().collect();
+    let mut static_modes: Vec<_> = static_caps.iter_modes().collect();
+    alloc_modes.sort_by_key(key);
+    static_modes.sort_by_key(key);
+    assert_eq!(alloc_modes, static_modes);
+}
+
+#[test]
+fn static_base_dtd_takes_over_a_standard_timing() {
+    let mut bytes = minimal_base_edid();
+    bytes[0x26..0x28].copy_from_slice(&[209, 0xC0]); // standard timing 1920×1080 @ 60 Hz
+    bytes[0x36..0x48].copy_from_slice(&DTD_1080P60);
+    fix_checksums(&mut bytes);
+
+    let entries = static_1080p60_entries(&bytes);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].pixel_clock_khz, Some(148_500));
+    assert_eq!(entries[0].h_front_porch, 88);
+    assert_eq!(
+        entries[0].source,
+        Some(piaf::model::capabilities::ModeSource::Dtd { block: 0, index: 0 })
+    );
+    assert_same_modes_as_alloc(&bytes);
+}
+
+#[test]
+fn static_cta_dtd_takes_over_its_svd() {
+    let mut bytes = edid_with_cea_vdb(&[16]); // VIC 16: 1920×1080 @ 60 Hz
+    let dtd_offset = usize::from(bytes[130]);
+    bytes[128 + dtd_offset..128 + dtd_offset + 18].copy_from_slice(&DTD_1080P60);
+    fix_checksums(&mut bytes);
+
+    let entries = static_1080p60_entries(&bytes);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].pixel_clock_khz, Some(148_500));
+    assert_eq!(
+        entries[0].source,
+        Some(piaf::model::capabilities::ModeSource::Dtd { block: 1, index: 0 })
+    );
+    assert_same_modes_as_alloc(&bytes);
+}
+
+#[test]
+fn static_keeps_the_first_of_two_matching_dtds() {
+    let mut bytes = minimal_base_edid();
+    bytes[0x36..0x48].copy_from_slice(&DTD_1080P60);
+    bytes[0x48..0x5A].copy_from_slice(&DTD_1080P60);
+    fix_checksums(&mut bytes);
+
+    let entries = static_1080p60_entries(&bytes);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].source,
+        Some(piaf::model::capabilities::ModeSource::Dtd { block: 0, index: 0 })
+    );
+}

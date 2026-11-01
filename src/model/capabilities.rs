@@ -21,8 +21,8 @@ pub trait ModeSink {
     /// Push a decoded video mode. Implementations ignore duplicates, but differ in what a
     /// duplicate is: [`DisplayCapabilities`] drops only a mode equal in every field (so two
     /// timings for the same resolution and rate are both kept), `StaticDisplayCapabilities`
-    /// any mode with the same width, height, refresh rate and interlace flag (the first
-    /// wins).
+    /// any mode with the same width, height, refresh rate and interlace flag (the first is
+    /// kept, except that a DTD-sourced mode replaces a matching entry from another source).
     fn push_mode(&mut self, mode: VideoMode);
     /// Push a non-fatal warning encountered while processing a block.
     fn push_warning(&mut self, w: EdidWarning);
@@ -376,22 +376,25 @@ impl<const MAX_MODES: usize> StaticDisplayCapabilities<MAX_MODES> {
 
 impl<const MAX_MODES: usize> ModeSink for StaticDisplayCapabilities<MAX_MODES> {
     fn push_mode(&mut self, mode: VideoMode) {
-        if self.num_modes < MAX_MODES {
-            // Dedup by (width, height, refresh_rate, interlaced) — the same criterion used
-            // by the alloc pipeline when processing CEA SVDs.  The first entry for a given
-            // resolution/rate wins, so a DTD-derived mode with full timing detail takes
-            // precedence over a later SVD-derived mode with sparse timing detail.
-            for i in 0..self.num_modes {
-                if let Some(existing) = &self.supported_modes[i] {
-                    if existing.width == mode.width
-                        && existing.height == mode.height
-                        && existing.refresh_rate == mode.refresh_rate
-                        && existing.interlaced == mode.interlaced
-                    {
-                        return;
-                    }
+        // Dedup by (width, height, refresh_rate, interlaced). The first entry for a
+        // resolution/rate is kept, except that a DTD takes over an entry from any other
+        // source (an established, standard or VIC mode), as the alloc pipeline's
+        // `decode_dtd_slot` does: the DTD carries the full timing, and DTDs often come
+        // after those entries (base block, CTA block). An earlier DTD's entry is kept.
+        let is_dtd = |m: &VideoMode| matches!(m.source, Some(ModeSource::Dtd { .. }));
+        for existing in self.supported_modes[..self.num_modes].iter_mut().flatten() {
+            if existing.width == mode.width
+                && existing.height == mode.height
+                && existing.refresh_rate == mode.refresh_rate
+                && existing.interlaced == mode.interlaced
+            {
+                if is_dtd(&mode) && !is_dtd(existing) {
+                    *existing = mode;
                 }
+                return;
             }
+        }
+        if self.num_modes < MAX_MODES {
             self.supported_modes[self.num_modes] = Some(mode);
             self.num_modes += 1;
         }

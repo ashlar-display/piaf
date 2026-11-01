@@ -723,6 +723,30 @@ mod static_tests {
         ]));
     }
 
+    /// Runs in every build, bare `no_std` included, where the base block's modes go
+    /// through `StaticDisplayCapabilities`' own sink rather than `BaseBlockHandler`.
+    #[test]
+    fn test_static_pipeline_base_dtd_takes_over_a_standard_timing() {
+        let mut bytes = [0u8; 128];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x26..0x28].copy_from_slice(&[209, 0xC0]); // standard timing 1920×1080 @ 60 Hz
+        bytes[0x36..0x48].copy_from_slice(&[
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0x00, 0, 0, 0, 0, 0, 0x1E,
+        ]); // the same mode as a DTD, 148.5 MHz
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        let mut entries = caps
+            .iter_modes()
+            .filter(|m| m.width == 1920 && m.height == 1080);
+        let entry = entries.next().unwrap();
+        assert!(entries.next().is_none());
+        assert_eq!(entry.pixel_clock_khz, Some(148_500));
+        assert_eq!(entry.source, Some(ModeSource::Dtd { block: 0, index: 0 }));
+    }
+
     // VTB-EXT is decoded in alloc builds only.
     const BORDERED_MODES: usize = if cfg!(any(feature = "alloc", feature = "std")) {
         3

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **No-alloc builds discarded DTD timings that repeated an earlier mode.**
+  `StaticDisplayCapabilities` kept the first mode for a resolution and rate, so a DTD
+  after a matching established, standard or VIC entry (base block in bare `no_std`
+  builds, the CTA block's DTDs in every build) was dropped with its pixel clock, blanking
+  and source. A DTD now replaces such an entry, as `DisplayCapabilities` does; an earlier
+  DTD's entry is kept.
+
 ## [0.5.0] - 2026-10-29
 
 ### Breaking changes
