@@ -511,7 +511,7 @@ mod tests {
         let mut caps = DisplayCapabilities::default();
         BaseBlockHandler.process(&[&base], &mut caps, &mut Vec::new());
 
-        assert_eq!(caps.manufacturer, Some(ManufacturerId([b'S', b'A', b'M'])));
+        assert_eq!(caps.manufacturer, Some(ManufacturerId(*b"SAM")));
         assert_eq!(caps.product_code, Some(0x1234));
         assert_eq!(caps.serial_number, Some(0x12345678));
         assert!(caps.digital);
