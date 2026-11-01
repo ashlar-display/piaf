@@ -988,6 +988,42 @@ mod static_tests {
         }
     }
 
+    /// `BaseBlockHandler` sets the preferred timing every time: a base handler registered
+    /// after it can correct it (a quirk fix), one registered before it is overwritten.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    #[test]
+    fn test_a_later_base_handler_can_correct_the_preferred_timing() {
+        use crate::model::extension::ExtensionHandler;
+        #[derive(Debug)]
+        struct Quirk;
+        impl ExtensionHandler for Quirk {
+            fn process(
+                &self,
+                _: &[&[u8; 128]],
+                caps: &mut DisplayCapabilities,
+                _: &mut Vec<ParseWarning>,
+            ) {
+                caps.preferred_timing = Some(VideoMode::new(640, 480, 60u32, false));
+            }
+        }
+        let bytes = edid_with_repeated_preferred_dtd();
+        let width = |library: &ExtensionLibrary| {
+            let parsed = parse_edid(&bytes, library).unwrap();
+            capabilities_from_edid(&parsed, library)
+                .preferred_timing
+                .map(|m| m.width)
+        };
+
+        let mut after = ExtensionLibrary::with_standard_handlers();
+        after.add_base_handler(Quirk);
+        assert_eq!(width(&after), Some(640));
+
+        let mut before = ExtensionLibrary::new();
+        before.add_base_handler(Quirk);
+        before.add_base_handler(base::BaseBlockHandler);
+        assert_eq!(width(&before), Some(1920));
+    }
+
     /// PinReady's DMD panel: 1280×800 in the base block, 1280×720 in the CTA block. Only
     /// the base block's timing is the preferred timing, and no extension DTD stands in for
     /// a missing one.

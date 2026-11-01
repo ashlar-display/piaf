@@ -66,6 +66,9 @@ pub(super) fn decode_base_block(
 ///
 /// Extracts manufacturer ID, product code, serial number, input type, physical dimensions,
 /// monitor name and range limit descriptors, standard timings, and detailed timing descriptors.
+///
+/// Sets `preferred_timing` and `preferred_image_size_mm` every time, replacing earlier
+/// values: a base handler that corrects them must be registered after this one.
 #[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug)]
 pub struct BaseBlockHandler;

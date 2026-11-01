@@ -66,6 +66,12 @@ let mut library = ExtensionLibrary::with_standard_handlers();
 library.add_base_handler(MyBaseHandler);
 ```
 
+The built-in `BaseBlockHandler` (the first one in `with_standard_handlers`) sets
+`preferred_timing` and `preferred_image_size_mm` every time it runs, replacing any earlier
+value. A handler that corrects them, such as a quirk fix for a display whose first DTD is
+wrong, must be registered after it, as above; one registered before it is overwritten.
+Extension block handlers leave both alone.
+
 ### Registering an extension block handler (dynamic pipeline)
 
 Extension block handlers are registered per tag via `ExtensionMetadata`.
