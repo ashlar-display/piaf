@@ -141,9 +141,12 @@ pub fn capabilities_from_edid_with_options<T: EdidSource>(
 
     #[cfg(not(any(feature = "alloc", feature = "std")))]
     {
-        // The base block's decoded fields do not depend on the options.
-        let _ = (library, options);
+        // No handlers without `alloc`: the base block is decoded directly. The options
+        // reach the preferred timing, the one decoded mode this output holds.
+        let _ = library;
         base::decode_base_block(edid.base_block(), &mut caps, &mut NullSink);
+        caps.preferred_timing =
+            base::decode_preferred_timing(edid.base_block(), &options, &mut NullSink);
     }
 
     caps
@@ -885,6 +888,36 @@ mod static_tests {
                 },
             ]
         );
+    }
+
+    /// Runs in every build: `capabilities_from_edid` reports the preferred timing too, in
+    /// bare `no_std` decoded on its own, with the caller's options.
+    #[test]
+    fn test_capabilities_from_edid_sets_the_preferred_timing_in_every_build() {
+        use crate::model::options::{DtdBorderPolicy, DtdBorderReading};
+
+        let bytes = edid_with_repeated_preferred_dtd();
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        let library = ExtensionLibrary::with_standard_handlers();
+        #[cfg(not(any(feature = "alloc", feature = "std")))]
+        let library = ExtensionLibrary::new();
+
+        let caps = capabilities_from_edid(&parsed, &library);
+        let preferred = caps.preferred_timing.as_ref().unwrap();
+        assert_eq!((preferred.width, preferred.h_border), (1920, 2));
+        assert_eq!(
+            preferred.source,
+            Some(ModeSource::Dtd { block: 0, index: 0 })
+        );
+        let from_static = capabilities_from_edid_static::<8, _>(&parsed, &[]).preferred_timing;
+        assert_eq!(caps.preferred_timing, from_static);
+
+        let options = DecodeOptions::new()
+            .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        let caps = capabilities_from_edid_with_options(&parsed, &library, options);
+        let reading = caps.preferred_timing.and_then(|m| m.dtd_border_reading);
+        assert_eq!(reading, Some(DtdBorderReading::Edid14));
     }
 
     /// Runs in every build: the shape warning comes after the DTDs' warnings.

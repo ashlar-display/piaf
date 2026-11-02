@@ -401,6 +401,25 @@ pub(super) fn preferred_timing_slot(base: &[u8; 128]) -> Option<&[u8]> {
         .find(|slot| is_timing_descriptor(slot))
 }
 
+/// The preferred timing decoded on its own, with the caller's border reading and source
+/// `Dtd { block: 0, index: 0 }`: for the bare `no_std` `capabilities_from_edid`, which has no
+/// mode list to decode it into. Warnings from decoding it go to `warn`.
+#[cfg(not(any(feature = "alloc", feature = "std")))]
+pub(super) fn decode_preferred_timing(
+    base: &[u8; 128],
+    options: &DecodeOptions,
+    warn: &mut dyn FnMut(EdidWarning),
+) -> Option<VideoMode> {
+    let slot = preferred_timing_slot(base)?;
+    match build_dtd_mode(slot, options.dtd_border_policy, warn) {
+        Ok(mode) => mode.map(|m| with_dtd_source(m, Some(0), 0)),
+        Err(w) => {
+            warn(w);
+            None
+        }
+    }
+}
+
 /// The image size of the preferred timing, in mm: the size in its descriptor
 /// ([`preferred_timing_slot`]).
 ///

@@ -59,6 +59,17 @@ pub(super) fn preferred_image_shape_warning(
     timings::preferred_image_shape_warning(mode, size)
 }
 
+/// The preferred timing for the bare `no_std` `capabilities_from_edid`, decoded once with
+/// the caller's options; see `timings::decode_preferred_timing`.
+#[cfg(not(any(feature = "alloc", feature = "std")))]
+pub(super) fn decode_preferred_timing(
+    base: &[u8; 128],
+    options: &DecodeOptions,
+    warn: &mut dyn ModeSink,
+) -> Option<VideoMode> {
+    timings::decode_preferred_timing(base, options, &mut |w| warn.push_warning(w))
+}
+
 #[cfg(not(any(feature = "alloc", feature = "std")))]
 pub(super) fn decode_base_block(
     base: &[u8; 128],
