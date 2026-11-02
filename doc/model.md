@@ -95,6 +95,7 @@ pub struct DisplayCapabilities {
     pub max_h_rate_khz: Option<u16>,
     pub max_pixel_clock_mhz: Option<u16>,
     pub timing_formula: Option<TimingFormula>,
+    pub preferred_timing: Option<VideoMode>, // every build, unlike supported_modes
     // alloc/std only:
     pub supported_modes: Vec<VideoMode>,
     // Panel (from DisplayID, alloc/std only):
@@ -126,6 +127,13 @@ Rate fields (`min_v_rate`, `max_v_rate`, `min_h_rate_khz`, `max_h_rate_khz`) are
 rather than `u8` because the `0xFD` range limits descriptor can add a 255-unit offset to
 extend beyond the 8-bit range.
 
+`preferred_timing` is the base block's first timing descriptor, with its full timing and
+source `Dtd { block: 0, index: 0 }`: EDID 1.4 and later always have one, EDID 1.3 and earlier
+only with the preferred-timing feature bit set (as edid-decode, libdisplay-info and Linux's
+DRM read it). `preferred_image_size_mm` is that descriptor's image size, under the same
+rule. Extension blocks never fill either. Only the base block's handler sets them; a base
+handler that corrects them is registered after it ([extensibility](extensibility.md)).
+
 ### `StaticDisplayCapabilities<const MAX_MODES: usize>` (static pipeline, all tiers)
 
 The output type for `capabilities_from_edid_static`. Contains all the same scalar fields as
@@ -137,12 +145,13 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     // All scalar fields identical to DisplayCapabilities
     pub manufacturer: Option<ManufacturerId>,
     // ...
+    pub preferred_timing: Option<VideoMode>, // set even when supported_modes is full
 
     // Mode storage
     pub supported_modes: [Option<VideoMode>; MAX_MODES],
     pub num_modes: usize,
 
-    // Warning storage (private; see the accessors below)
+    // Warning storage and the dropped-mode count (private; see the accessors below)
 }
 ```
 
@@ -154,6 +163,7 @@ for mode in caps.iter_modes() { /* &VideoMode */ }
 for warn in caps.iter_warnings() { /* &EdidWarning */ }
 let all: &[EdidWarning] = caps.warnings();
 let lost: u16 = caps.warnings_dropped(); // beyond MAX_STATIC_WARNINGS (8)
+let missed: u16 = caps.modes_dropped(); // beyond MAX_MODES (an upper bound)
 ```
 
 ### `VideoMode` construction
