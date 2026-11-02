@@ -16,7 +16,7 @@ Any VSDB whose OUI is not in the table above is silently ignored.
 
 ## HDMI 1.x VSDB (OUI `0x000C03`)
 
-Source: HDMI 1.4b specification section 8.3.2.
+Source: HDMI 1.4b's vendor-specific data block, as Linux kernel `drm_edid.c` and edid-decode decode it.
 
 ```
 Byte 1:   Tag (0x03) | Length N
@@ -46,8 +46,8 @@ Decoded into `HdmiVsdb` stored in `Cea861Capabilities::hdmi_vsdb`.
 
 ## HDMI Forum VSDB / HF-VSDB (OUI `0xC45DD8`)
 
-Source: HDMI 2.1a specification section 10.3.2 (structure reconstructed from
-Linux kernel `drm_edid.c`, edid-decode, and libdisplay-info).
+Source: structure reconstructed from Linux kernel `drm_edid.c`, edid-decode, and
+libdisplay-info.
 
 The HF-VSDB carries the **HDMI Forum Sink Capability Data Structure (SCDS)**,
 which is identical to the payload of the HF-SCDB (extended tag `0x79`) except

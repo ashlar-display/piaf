@@ -8,6 +8,7 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
+display-types = "0.5.1"
 libfuzzer-sys = "0.4"
 
 [dependencies.piaf]

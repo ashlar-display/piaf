@@ -7,6 +7,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-02
+
+### Breaking changes
+
+- **`parse_edid` rejects a base block whose version byte is not 1**, with the new
+  `EdidError::UnsupportedVersion { version }` (`#[non_exhaustive]`). Such a block is not
+  laid out as EDID 1.x (EDID 2.0 has a different structure; 0 is typical of an unprogrammed
+  EEPROM), and was decoded as if it were. libdisplay-info and Linux's DRM refuse it too, and
+  edid-decode fails it. A corrupt checksum is still reported first. `EdidError` had only
+  unit variants; with this struct variant its variants can no longer be cast to an integer
+  (`as isize`), which `cargo semver-checks` reports as breaking.
+- **`preferred_image_size_mm` follows the preferred timing** (`preferred_timing`, under
+  Added): the size in its descriptor, `None` when the EDID has no preferred timing. It was slot 0's size
+  whatever the version and feature bit, and `None` when slot 0 held a display descriptor
+  even though a later timing was the preferred one. Values change only for EDID 1.3 and
+  earlier without the feature bit, and for that layout.
+  For EDID 1.3 and earlier without the feature bit this loses the size, which the first
+  timing descriptor may still give (some EDID 1.3 monitors clear the bit); it comes back
+  when each descriptor's own size is decoded. Until then, `preferred_image_size_mm`'s
+  documentation (display-types) says where to read it.
+- **`ModeSource::Dtd { index }` counted descriptor slots, not timing descriptors.** A
+  display descriptor before a timing (base block or CTA block) shifted the timing's
+  index, so the base block's first timing could be `index: 1`. The index now counts timing
+  descriptors only, as its documentation says, per block (in the base block, edid-decode's
+  numbering); it changes only for EDIDs with that layout.
+- **No-alloc builds discarded DTD timings that repeated an earlier mode.**
+  `StaticDisplayCapabilities` kept the first mode for a resolution and rate, so a DTD
+  after a matching established, standard or VIC entry (base block in bare `no_std`
+  builds, the CTA block's DTDs in every build) was dropped with its pixel clock, blanking
+  and source. A DTD now replaces such an entry, as `DisplayCapabilities` does; an earlier
+  DTD's entry is kept. The entry's source changes with it: a mode that was
+  `ModeSource::Vic(n)` in `StaticDisplayCapabilities` is now `ModeSource::Dtd { .. }` when a
+  DTD repeats it (established and standard timings had no source). The no-alloc output
+  keeps no other record of that VIC; `DisplayCapabilities` has always behaved this way, with
+  the VIC still in `Cea861Capabilities::vics`. Code that matched on `Vic` for such a mode no
+  longer finds it.
+
+### Added
+
+- **`StaticDisplayCapabilities::modes_dropped()`** counts the modes that did not fit in
+  `MAX_MODES` (saturating at `u16::MAX`), like `warnings_dropped()`; they were dropped
+  without a count. A repeat of a stored mode is deduplicated, not counted; a repeat of a
+  dropped mode cannot be recognised and is counted again, so the count is an upper bound on
+  the distinct modes lost, and non-zero exactly when one was.
+- **`EdidWarning::PreferredImageSizeShapeMismatch`** when the preferred timing's image
+  size does not have the shape of its pixels: one side kept, the other derived from the
+  active pixels (frame lines when interlaced), more than 10 mm off; not checked below
+  100 × 100 mm (edid-decode's check and tolerance). It carries the declared and the
+  matching size; whether the pixels are non-square or the size is wrong is the caller's
+  call.
+- **`ModeSource` is re-exported at the crate root** (`piaf::ModeSource`), next to
+  `VideoMode`, whose `source` field uses it; it was reachable only as
+  `piaf::model::capabilities::ModeSource`.
+- **The preferred timing, `DisplayCapabilities::preferred_timing`** (display-types
+  0.5.1): the base block's first timing descriptor, with its full timing and source
+  `Dtd { block: 0, index: 0 }`. EDID 1.4 and later always have one; EDID 1.3 and earlier
+  only with the preferred-timing feature bit set, as edid-decode, libdisplay-info and
+  Linux's DRM read it. Extension blocks never fill it. It replaces searching
+  `supported_modes` for that source. `StaticDisplayCapabilities::preferred_timing` carries
+  it in no-alloc builds, set even when the mode list is full.
+- **Warnings for a misplaced preferred timing**: `EdidWarning::PreferredTimingNotInFirstSlot
+  { timing_slot }` when the EDID has a preferred timing but the base block's first slot is
+  not a timing (edid-decode and libdisplay-info both flag it; `timing_slot` is where the
+  first timing is, `None` for none), and `EdidWarning::PreferredTimingBitClear` for an
+  EDID 1.3 base block without the preferred-timing feature bit (as edid-decode flags it).
+- **`EdidWarning::DtdGeometryInvalid`** for a Detailed Timing Descriptor with a pixel clock
+  but a zero active area or blanking, with the raw values. Such a descriptor was skipped
+  without a warning; when it is the preferred timing, `preferred_timing` is `None` and this
+  warning says why.
+- The new `EdidWarning` struct variants are not `#[non_exhaustive]`, like the existing
+  ones: a custom `StaticExtensionHandler` can report only `EdidWarning`s, so it must be able
+  to construct them (one that decodes its own DTDs reports `DtdGeometryInvalid`, for
+  example). `EdidError::UnsupportedVersion` is `#[non_exhaustive]`: only piaf creates errors.
+
+### Fixed
+
+- **The stack-size note for `StaticDisplayCapabilities` said about 3 KB at `MAX_MODES = 64`;
+  it is about 4 KB** (4,064 bytes on `thumbv7em-none-eabi`, 4,144 on x86-64: 56 bytes per
+  mode slot plus the other fields). The note was already low before this release, which
+  adds `preferred_timing` (56 bytes) and the dropped-mode count.
+- **`StaticDisplayCapabilities` ordered the base block's warnings differently with
+  `alloc`.** With `alloc` the DTD warnings came before `InvalidManufacturerId` (and now the
+  preferred-timing warnings); in bare `no_std` after them. With only
+  `MAX_STATIC_WARNINGS` kept, a full list could hold different warnings per build. Both
+  now report the header and preferred-timing warnings first, then the DTDs'.
+
+### Internal
+
+- **CI runs the tests with `alloc` only and the bare `no_std` library tests**, in `ci.yml`
+  and in the `verify` job of `publish.yml`; both configurations were only built for
+  `thumbv7em-none-eabi`. The `alloc`-only tests did not compile (six test modules used
+  `vec!` and `to_string` without the `alloc` imports a build without `std` needs); they
+  import them when `std` is off.
+
 ## [0.5.0] - 2026-10-29
 
 ### Breaking changes
@@ -286,7 +380,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for computing rates from large intermediate products such as
   `pixel_clock_hz / (h_total × v_total)`.
 - **`CvtAlgorithm`** re-exported from `piaf` — CVT formula selector for Type IX
-  descriptors. `Reserved(u8)` for spec-reserved encodings.
+  descriptors. `Reserved(u8)` for reserved encodings.
 - **Type VII Detailed Timing decoder shared between DisplayID 2.x (`0x22`) and the CTA
   T7VTDB path** via `decode_type_vii_descriptor_to_mode`. The CTA wrapper remains parsed
   inline; the 20-byte body decodes through the shared function.
@@ -322,8 +416,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active/blank/front-porch/sync-width fields all stored as `value − 1`, with sync
   polarity in bit 15 of the H/V Front Porch words. The previous decoder treated
   byte 0 as options, bytes 1–2 as a 16-bit pixel clock, all subsequent fields
-  shifted by one byte, and byte 19 as a flags field — none of which matches the
-  spec. Type I has been rewritten to delegate to a shared
+  shifted by one byte, and byte 19 as a flags field — none of which matches
+  DisplayID. Type I has been rewritten to delegate to a shared
   `decode_type_1_7_descriptor_body(d, pixel_clock_unit_khz)` helper that Type VII
   also uses.
 - **DisplayID Type V (`0x11`), Type VII (`0x22`), Type IX (`0x24`) off-by-one** —
@@ -346,7 +440,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skipped" since the wire format cannot represent value 0.
 
   All items identified in the cross-check against `edid-decode` have since been
-  resolved: `CvtAlgorithm` enum reshaped to spec-correct variants (`Cvt`/`CvtRb`/`CvtR2`);
+  resolved: `CvtAlgorithm` enum reshaped to the correct variants (`Cvt`/`CvtRb`/`CvtR2`);
   Type IX/V byte 0 bit 3 decoded as `ntsc_fractional_refresh` (not bit 4, and not `y420`);
   Type IX/V bits 6:5 decoded as `TypeIxStereoMode`; Type VII byte 3 bit 7 decoded as
   `y420` (block revision ≥ 2).

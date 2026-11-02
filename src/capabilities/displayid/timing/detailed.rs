@@ -5,7 +5,7 @@ use crate::model::capabilities::{ModeSink, RefreshRate, StereoMode, SyncDefiniti
 /// Type I is "superseded by Type VII" (DisplayID 1.x §4.4.2 / 2.x §4.5.7) and shares
 /// Type VII's wire layout exactly except for the pixel-clock unit: Type I uses 10 kHz
 /// steps, Type VII uses 1 kHz. Every multi-byte field stores `value − 1` (the wire
-/// encoding can't represent the all-zero descriptor as a valid mode, so the spec
+/// encoding can't represent the all-zero descriptor as a valid mode, so DisplayID
 /// reserves the all-zero state and shifts everything else down by one).
 ///
 /// Descriptor layout:

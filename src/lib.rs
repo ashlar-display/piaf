@@ -7,7 +7,7 @@
 //!
 //! # Decoding philosophy
 //!
-//! PIAF decodes everything a specification defines. No field is omitted because it appears
+//! PIAF decodes everything a standard defines. No field is omitted because it appears
 //! obscure or unlikely to be needed — that judgement belongs to the consumer. [`Option`]
 //! fields communicate presence or absence in the source data, not relative importance.
 //!
@@ -51,8 +51,8 @@ pub use model::{
     DisplayInterfaceFeatures, DisplayInterfaceType, DisplayTechnology, DtdBorderPolicy,
     DtdBorderReading, EdidError, EdidSource, EdidVersion, EdidWarning, ExtensionLibrary,
     ExtensionMetadata, ExtensionTagRegistry, GtfSecondaryParams, InterfaceContentProtection,
-    KnownExtensions, MAX_STATIC_WARNINGS, ManufactureDate, ManufacturerId, ModeSink, MonitorString,
-    OperatingMode, ParsedEdidRef, PhysicalOrientation, PowerSequencing, RefreshRate,
+    KnownExtensions, MAX_STATIC_WARNINGS, ManufactureDate, ManufacturerId, ModeSink, ModeSource,
+    MonitorString, OperatingMode, ParsedEdidRef, PhysicalOrientation, PowerSequencing, RefreshRate,
     RotationCapability, ScanDirection, ScreenSize, StaticContext, StaticDisplayCapabilities,
     StaticExtensionHandler, StereoMode, StereoSyncInterface, StereoTimingCode,
     StereoTimingCodeType, StereoTimingScopeV2, StereoViewingMode, SubpixelLayout, SyncDefinition,

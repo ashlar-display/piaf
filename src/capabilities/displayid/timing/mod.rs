@@ -140,6 +140,9 @@ mod tests {
     use crate::model::capabilities::{
         DisplayCapabilities, RefreshRate, StaticContext, StaticDisplayCapabilities,
     };
+    // Without `std`, `vec!` is not in the prelude.
+    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    use alloc::vec;
 
     #[allow(clippy::too_many_arguments)] // mirrors the wire-format field list
     fn make_type_i_descriptor(

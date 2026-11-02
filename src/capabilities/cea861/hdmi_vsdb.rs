@@ -10,7 +10,7 @@ pub(super) const HDMI_OUI: [u8; 3] = {
     ]
 };
 
-/// Decodes a latency byte per the HDMI 1.x spec:
+/// Decodes a latency byte as HDMI 1.x defines it:
 /// - `0` or `255` → `None` (not defined / unknown)
 /// - `1..=251` → `Some((value - 1) * 2)` milliseconds
 /// - `252..=254` → `None` (reserved)

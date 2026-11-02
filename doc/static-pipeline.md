@@ -82,9 +82,12 @@ pub fn iter_modes(&self) -> impl Iterator<Item = &VideoMode>
 pub fn warnings(&self) -> &[EdidWarning]
 pub fn iter_warnings(&self) -> impl Iterator<Item = &EdidWarning>
 pub fn warnings_dropped(&self) -> u16
+pub fn modes_dropped(&self) -> u16
 ```
 
-Modes beyond capacity are silently dropped. 64 is a reasonable default for `MAX_MODES`;
+Modes beyond capacity are not stored but counted in `modes_dropped()` (saturating at
+`u16::MAX`; a repeat of a stored mode is not counted, a repeat of a dropped one is, so it
+is an upper bound on the distinct modes lost). 64 is a reasonable default for `MAX_MODES`;
 real displays rarely declare more than ~40 modes. Up to `MAX_STATIC_WARNINGS` (8) warnings
 are stored; `warnings_dropped()` counts the ones that did not fit (saturating at
 `u16::MAX`). The warning API is the same in every build.
@@ -200,12 +203,17 @@ speaker allocation — those require the alloc pipeline and are available throug
 
 ## Limitations and sizing notes
 
-**Stack size.** At `MAX_MODES = 64`, `StaticDisplayCapabilities` is roughly 3 KB on the stack.
+**Stack size.** Each mode slot takes 56 bytes, and the other fields about 480 bytes on a
+32-bit target (560 on a 64-bit one). At `MAX_MODES = 64`, `StaticDisplayCapabilities` is
+about 4 KB on the stack: 4,064 bytes on `thumbv7em-none-eabi`, 4,144 on x86-64.
 On Cortex-M0 targets with small stacks, place the result in a `static mut` if stack pressure is
 a concern.
 
-**`preferred_image_size_mm`.** The image size of the preferred timing (the base block's first
-DTD), populated in every build. Other DTDs, CEA or base, do not set it.
+**`preferred_timing` and `preferred_image_size_mm`.** The preferred timing (the base block's
+first timing descriptor; EDID 1.4 and later always have one, 1.3 and earlier only with the
+preferred-timing feature bit) and its image size, populated in every build. Other DTDs, CTA
+or base, do not set them. `preferred_timing` is set even when `supported_modes` is full, and
+is decoded once: the mode in the list, if it fits, is the same value.
 
 **Multi-block formats in bare `no_std`.** In `alloc`/`std` builds, the dispatch layer collects
 all fragments for a given tag and calls the handler once with the full slice. In bare `no_std`

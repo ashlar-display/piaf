@@ -129,6 +129,9 @@ pub(super) fn decode_cta_video_timing_block(payload: &[u8], sink: &mut dyn ModeS
 mod tests {
     use super::*;
     use crate::model::capabilities::{DisplayCapabilities, RefreshRate, SyncDefinition};
+    // Without `std`, `vec!` is not in the prelude.
+    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    use alloc::vec;
 
     // -----------------------------------------------------------------------
     // Type IV DMT/VIC Code Block (tag 0x06)

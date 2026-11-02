@@ -28,7 +28,7 @@ pub(crate) use display_types::cea861::{dmt_to_mode, vic_to_mode};
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 use crate::capabilities::base::timings::decode_dtd_slot;
-use crate::capabilities::base::timings::decode_dtd_slot_into_sink;
+use crate::capabilities::base::timings::{decode_dtd_slot_into_sink, is_timing_descriptor};
 use crate::model::capabilities::DisplayCapabilities;
 use crate::model::capabilities::ModeSink;
 use crate::model::capabilities::StaticContext;
@@ -100,7 +100,7 @@ impl ExtensionHandler for Cea861Handler {
         for (i, ext) in blocks.iter().enumerate() {
             let block = ctx.block_number(i);
             // Parse the data block collection: bytes 4 through dtd_offset-1.
-            // When dtd_offset == 0 the spec says no DTDs are present, so data blocks
+            // When dtd_offset == 0 CTA-861 says no DTDs are present, so data blocks
             // may fill the rest of the block (bytes 4–127).
             let dtd_offset = ext[2] as usize;
             let collection_end = if dtd_offset == 0 {
@@ -120,14 +120,17 @@ impl ExtensionHandler for Cea861Handler {
             }
 
             // Parse Detailed Timing Descriptors from byte dtd_offset through byte 126.
-            // When dtd_offset == 0 there are no DTDs (the spec says no timing data present).
+            // When dtd_offset == 0 there are no DTDs (CTA-861 says no timing data present).
             if (4..=110).contains(&dtd_offset) {
                 let mut offset = dtd_offset;
                 let mut dtd_index: u8 = 0;
                 while offset + 18 <= 127 {
-                    decode_dtd_slot(&ext[offset..offset + 18], caps, block, dtd_index, options);
+                    let slot = &ext[offset..offset + 18];
+                    decode_dtd_slot(slot, caps, block, dtd_index, options);
                     offset += 18;
-                    dtd_index = dtd_index.saturating_add(1);
+                    if is_timing_descriptor(slot) {
+                        dtd_index = dtd_index.saturating_add(1);
+                    }
                 }
             }
         } // end for ext in blocks
@@ -519,9 +522,12 @@ pub(crate) fn cea861_process_into_sink(
         let mut offset = dtd_offset;
         let mut dtd_index: u8 = 0;
         while offset + 18 <= 127 {
-            decode_dtd_slot_into_sink(&ext[offset..offset + 18], sink, block, dtd_index, options);
+            let slot = &ext[offset..offset + 18];
+            decode_dtd_slot_into_sink(slot, sink, block, dtd_index, options);
             offset += 18;
-            dtd_index = dtd_index.saturating_add(1);
+            if is_timing_descriptor(slot) {
+                dtd_index = dtd_index.saturating_add(1);
+            }
         }
     }
 }
@@ -563,6 +569,9 @@ mod test_static {
 mod tests {
     use super::*;
     use crate::model::capabilities::{DisplayCapabilities, RefreshRate};
+    // Without `std`, `vec!` is not in the prelude.
+    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    use alloc::vec;
 
     #[test]
     fn test_audio_flag() {

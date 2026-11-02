@@ -133,7 +133,7 @@ pub(super) fn scan_product_id_block(payload: &[u8], caps: &mut DisplayCapabiliti
 /// - Bytes 5–8:   Serial number (little-endian uint32; `0` = not specified)
 /// - Byte  9:     Week of manufacture (`0` = unspecified, `0xFF` = model year)
 /// - Byte  10:    Year (`byte + 2000`; when week = `0xFF`, this is the model year)
-/// - Byte  11:    Product name length in bytes (`0` = no name; spec maximum 236)
+/// - Byte  11:    Product name length in bytes (`0` = no name; maximum 236)
 /// - Bytes 12+:   Product name (no termination; ASCII / ISO 8859-1)
 ///
 /// The OUI is written to `did.manufacturer_oui`. The V1 PNP-derived `caps.manufacturer`
@@ -199,7 +199,7 @@ const fn decode_v2_manufacture_date(week: u8, year: u8) -> ManufactureDate {
 
 /// Converts an IEEE 754-2008 binary16 (half-precision) value to `f32`.
 ///
-/// Returns `None` for either zero (`0x8000` is the spec's "not used" sentinel; `0x0000`
+/// Returns `None` for either zero (`0x8000` is DisplayID's "not used" sentinel; `0x0000`
 /// is accepted leniently because 0 cd/m² is degenerate for any of the three luminance
 /// fields and almost certainly indicates an EDID writer that confused the sign), or
 /// when the value decodes to `NaN` / infinity (out-of-range for cd/m² readings).
@@ -239,7 +239,7 @@ fn decode_luminance_f16(raw: u16) -> Option<f32> {
 /// Maps the 3-bit DisplayID 2.x color depth field (block 0x21 byte 27, bits 2:0) to a
 /// `(bpc, ColorBitDepth)` pair, the two representations needed at the call site.
 ///
-/// Returns `None` for the "undefined" code (`0`) and for values reserved by the spec
+/// Returns `None` for the "undefined" code (`0`) and for values reserved by DisplayID
 /// (`6`, `7`). The 2.x encoding skips 14 bpc (which 1.x supports), so `5` decodes to 16.
 #[cfg(any(feature = "alloc", feature = "std"))]
 const fn decode_v2_color_bit_depth(field: u8) -> Option<(u8, ColorBitDepth)> {
@@ -408,7 +408,7 @@ pub(super) fn decode_v2_dynamic_timing_range_block(
     let flags = payload[8];
 
     // 0x25 has no in-band fields in the data-block revision byte (unlike 0x21's bit 7
-    // and 0x27's bits 7:6); the whole byte is the revision number. Spec defines rev 0
+    // and 0x27's bits 7:6); the whole byte is the revision number. DisplayID defines rev 0
     // (8-bit max v rate) and rev 1 (9-bit max v rate using bits 1:0 of the flags byte).
     let max_v_rate_hz: u16 = if revision >= 1 {
         u16::from(max_v_lsb) | (u16::from(flags & 0x03) << 8)
@@ -684,7 +684,7 @@ pub(super) fn decode_v2_vendor_specific_block(payload: &[u8], did: &mut DisplayI
 /// 0x81-derived data combines with any data parsed from a real CEA-861 extension
 /// block on the same EDID — regardless of which extension was processed first.
 ///
-/// Spec marks revision 0 as the only defined value; non-zero revisions emit
+/// DisplayID marks revision 0 as the only defined value; non-zero revisions emit
 /// [`EdidWarning::UnsupportedV2BlockRevision`] and the payload is parsed anyway
 /// using the revision-0 wire format.
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -1544,6 +1544,9 @@ mod tests {
     use super::*;
     use crate::model::color::{Chromaticity, ColorBitDepth};
     use crate::model::manufacture::{ManufactureDate, ManufacturerId, MonitorString};
+    // Without `std`, `vec!` and `ToString` are not in the prelude.
+    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    use alloc::{string::ToString, vec};
 
     // -----------------------------------------------------------------------
     // Shared test helpers
@@ -2121,7 +2124,7 @@ mod tests {
 
     #[test]
     fn test_v2_display_params_positive_zero_luminance_is_unused() {
-        // +0 (0x0000) is not the spec's sentinel, but 0 cd/m² is degenerate for any
+        // +0 (0x0000) is not DisplayID's sentinel, but 0 cd/m² is degenerate for any
         // luminance field — accept it leniently as "unused" rather than Some(0.0).
         let p = make_v2_display_params_payload(
             0,

@@ -10,7 +10,7 @@ use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
 /// manufacturer-specific and are not decoded here.
 pub(super) fn decode_established_timings(base: &[u8; 128], sink: &mut dyn ModeSink) {
     // (byte offset, bit mask, width, height, refresh_rate)
-    // Note: 1024x768@87 is interlaced in the EDID spec; stored as-is since VideoMode
+    // Note: 1024x768@87 is interlaced in EDID; stored as-is since VideoMode
     // has no interlace field.
     const TIMINGS: &[(usize, u8, u16, u16, u16)] = &[
         (0x23, 0x80, 720, 400, 70),
@@ -74,9 +74,10 @@ pub(super) fn decode_standard_timings(base: &[u8; 128], sink: &mut dyn ModeSink)
 /// [`EdidWarning::DtdBlankingInconsistent`]) go to `warn`; the mode is still returned.
 ///
 /// Returns:
-/// - `Ok(None)` — monitor descriptor (zero pixel clock) or undecodable geometry
+/// - `Ok(None)` — monitor descriptor (zero pixel clock)
 /// - `Ok(Some(mode))` — valid timing
-/// - `Err(w)` — [`EdidWarning::DtdSlotTooShort`] or [`EdidWarning::DtdPixelClockOverflow`]
+/// - `Err(w)` — [`EdidWarning::DtdSlotTooShort`], [`EdidWarning::DtdPixelClockOverflow`] or
+///   [`EdidWarning::DtdGeometryInvalid`]
 pub(crate) fn build_dtd_mode(
     dtd: &[u8],
     policy: DtdBorderPolicy,
@@ -99,7 +100,12 @@ pub(crate) fn build_dtd_mode(
     let vblank = (((dtd[7] as u16) & 0x0F) << 8) | (dtd[6] as u16);
 
     if hactive == 0 || vactive == 0 || hblank == 0 || vblank == 0 {
-        return Ok(None);
+        return Err(EdidWarning::DtdGeometryInvalid {
+            h_active: hactive,
+            h_blank: hblank,
+            v_active: vactive,
+            v_blank: vblank,
+        });
     }
 
     // Border (bytes 15–16): pixels/lines on each side of the active area.
@@ -232,6 +238,9 @@ pub(crate) fn build_dtd_mode(
 /// The mode's source is `Dtd { block, index }`; without a `block` (the caller does not know
 /// where the descriptor sits) the mode has no source.
 ///
+/// Returns the decoded mode (as decoded, whether or not it was added), or `None` when the
+/// slot holds no decodable timing.
+///
 /// This is `pub(crate)` so that the CEA-861 handler can reuse it for DTDs in extension blocks.
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub(crate) fn decode_dtd_slot(
@@ -240,17 +249,18 @@ pub(crate) fn decode_dtd_slot(
     block: Option<u8>,
     dtd_index: u8,
     options: &DecodeOptions,
-) {
+) -> Option<VideoMode> {
     let mode = match build_dtd_mode(dtd, options.dtd_border_policy, &mut |w| {
         caps.push_warning(w)
     }) {
         Err(w) => {
             caps.push_warning(w);
-            return;
+            return None;
         }
-        Ok(None) => return,
+        Ok(None) => return None,
         Ok(Some(m)) => with_dtd_source(m, block, dtd_index),
     };
+    let decoded = mode.clone();
 
     // If a mode with matching identity (w/h/rate/interlaced) was already added from a
     // non-DTD source (which has zero sync fields), upgrade it in place. An earlier DTD's
@@ -268,12 +278,13 @@ pub(crate) fn decode_dtd_slot(
     } else {
         caps.supported_modes.push(mode);
     }
+    Some(decoded)
 }
 
 /// Decodes a single 18-byte Detailed Timing Descriptor slice into a [`ModeSink`].
 ///
 /// Like [`decode_dtd_slot`] but writes into any [`ModeSink`] rather than directly into
-/// [`DisplayCapabilities`].
+/// [`DisplayCapabilities`]. Returns the decoded mode, as `decode_dtd_slot` does.
 ///
 /// This is `pub(crate)` so that the CEA-861 handler can use it for DTDs in extension blocks
 /// in no-alloc builds.
@@ -283,13 +294,20 @@ pub(crate) fn decode_dtd_slot_into_sink(
     block: Option<u8>,
     dtd_index: u8,
     options: &DecodeOptions,
-) {
+) -> Option<VideoMode> {
     match build_dtd_mode(dtd, options.dtd_border_policy, &mut |w| {
         sink.push_warning(w)
     }) {
-        Err(w) => sink.push_warning(w),
-        Ok(None) => {}
-        Ok(Some(mode)) => sink.push_mode(with_dtd_source(mode, block, dtd_index)),
+        Err(w) => {
+            sink.push_warning(w);
+            None
+        }
+        Ok(None) => None,
+        Ok(Some(mode)) => {
+            let mode = with_dtd_source(mode, block, dtd_index);
+            sink.push_mode(mode.clone());
+            Some(mode)
+        }
     }
 }
 
@@ -301,16 +319,113 @@ fn with_dtd_source(mode: VideoMode, block: Option<u8>, index: u8) -> VideoMode {
     }
 }
 
-/// The image size of the preferred timing, in mm: the size in the base block's first
-/// Detailed Timing Descriptor (slot `0x36`), which EDID defines as the preferred timing.
+/// Whether the EDID has a preferred timing: always from EDID 1.4 (revision byte `0x13`),
+/// and in EDID 1.3 and earlier only when the preferred-timing feature bit (byte `0x18`,
+/// bit 1) is set; from 1.4 that bit means the timing is also the native format.
 ///
-/// `None` when the slot holds a display descriptor (zero pixel clock) rather than a timing,
-/// or when either axis is 0 (undefined).
-pub(super) fn preferred_image_size_mm(base: &[u8; 128]) -> Option<(u16, u16)> {
-    let dtd = &base[0x36..0x48];
-    if dtd[0] == 0 && dtd[1] == 0 {
+/// As edid-decode, libdisplay-info and Linux's DRM read it.
+pub(super) fn has_preferred_timing(base: &[u8; 128]) -> bool {
+    base[0x13] >= 4 || base[0x18] & 0x02 != 0
+}
+
+/// Reports a preferred timing that is not where EDID puts it:
+/// [`EdidWarning::PreferredTimingNotInFirstSlot`] when the EDID has one but slot 0 is not a
+/// timing, [`EdidWarning::PreferredTimingBitClear`] for EDID 1.3 without the feature bit.
+pub(super) fn preferred_timing_warnings(base: &[u8; 128], warn: &mut dyn FnMut(EdidWarning)) {
+    if has_preferred_timing(base) {
+        let mut slots = base[0x36..0x7E].chunks_exact(18);
+        if !slots.next().is_some_and(is_timing_descriptor) {
+            let timing_slot = (1..4u8).zip(slots).find(|(_, s)| is_timing_descriptor(s));
+            warn(EdidWarning::PreferredTimingNotInFirstSlot {
+                timing_slot: timing_slot.map(|(i, _)| i),
+            });
+        }
+    } else if base[0x13] == 3 {
+        warn(EdidWarning::PreferredTimingBitClear);
+    }
+}
+
+/// [`EdidWarning::PreferredImageSizeShapeMismatch`] when the preferred timing's image size
+/// does not have the shape of its pixels, as edid-decode checks it: sizes under
+/// 100 × 100 mm are skipped, the expected size keeps one side and derives the other from
+/// the active pixels (frame lines for an interlaced timing), and a difference over 10 mm
+/// is reported.
+pub(super) fn preferred_image_shape_warning(
+    mode: &VideoMode,
+    (width_mm, height_mm): (u16, u16),
+) -> Option<EdidWarning> {
+    let (w_mm, h_mm) = (u32::from(width_mm), u32::from(height_mm));
+    if w_mm < 100 || h_mm < 100 {
         return None;
     }
+    let h_act = u32::from(mode.width);
+    let v_act = u32::from(mode.height) * if mode.interlaced { 2 } else { 1 };
+    let d = gcd(h_act, v_act);
+    if d == 0 {
+        return None;
+    }
+    let (h_ratio, v_ratio) = (h_act / d, v_act / d);
+    let v_expected = w_mm * v_ratio / h_ratio;
+    let h_expected = h_mm * h_ratio / v_ratio;
+    let off = |expected: u32, declared: u32| expected + 10 < declared || expected > declared + 10;
+    let (expected_width_mm, expected_height_mm) =
+        if v_expected > h_mm + 10 && h_expected < w_mm + 10 {
+            off(h_expected, w_mm).then_some((h_expected, h_mm))?
+        } else {
+            off(v_expected, h_mm).then_some((w_mm, v_expected))?
+        };
+    Some(EdidWarning::PreferredImageSizeShapeMismatch {
+        width_mm,
+        height_mm,
+        expected_width_mm,
+        expected_height_mm,
+    })
+}
+
+const fn gcd(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// The descriptor slot of the preferred timing: the base block's first timing descriptor,
+/// wherever it sits. `None` when the EDID has no preferred timing
+/// ([`has_preferred_timing`]) or the base block holds no timing descriptor.
+pub(super) fn preferred_timing_slot(base: &[u8; 128]) -> Option<&[u8]> {
+    if !has_preferred_timing(base) {
+        return None;
+    }
+    base[0x36..0x7E]
+        .chunks_exact(18)
+        .find(|slot| is_timing_descriptor(slot))
+}
+
+/// The preferred timing decoded on its own, with the caller's border reading and source
+/// `Dtd { block: 0, index: 0 }`: for the bare `no_std` `capabilities_from_edid`, which has no
+/// mode list to decode it into. Warnings from decoding it go to `warn`.
+#[cfg(not(any(feature = "alloc", feature = "std")))]
+pub(super) fn decode_preferred_timing(
+    base: &[u8; 128],
+    options: &DecodeOptions,
+    warn: &mut dyn FnMut(EdidWarning),
+) -> Option<VideoMode> {
+    let slot = preferred_timing_slot(base)?;
+    match build_dtd_mode(slot, options.dtd_border_policy, warn) {
+        Ok(mode) => mode.map(|m| with_dtd_source(m, Some(0), 0)),
+        Err(w) => {
+            warn(w);
+            None
+        }
+    }
+}
+
+/// The image size of the preferred timing, in mm: the size in its descriptor
+/// ([`preferred_timing_slot`]).
+///
+/// `None` when the EDID has no preferred timing, or when either axis is 0 (undefined).
+pub(super) fn preferred_image_size_mm(base: &[u8; 128]) -> Option<(u16, u16)> {
+    let dtd = preferred_timing_slot(base)?;
     // 12-bit H from byte 12 + upper nibble of byte 14, 12-bit V from byte 13 + lower
     // nibble of byte 14.
     let h_mm = (((dtd[14] as u16) & 0xF0) << 4) | (dtd[12] as u16);
@@ -320,25 +435,49 @@ pub(super) fn preferred_image_size_mm(base: &[u8; 128]) -> Option<(u16, u16)> {
 
 /// Decodes the four detailed timing descriptor (DTD) slots (offsets 0x36, 0x48, 0x5A, 0x6C).
 /// Slots with a zero pixel clock are monitor descriptors and are skipped here.
-// Called by capabilities_from_edid_static (step 6). The alloc BaseBlockHandler uses
-// decode_dtd_slot directly to preserve upgrade-in-place semantics.
+///
+/// Returns the preferred timing (the first timing descriptor, when the EDID has one), decoded
+/// once for both the mode list and the caller.
+// Called by capabilities_from_edid_static in bare no_std builds. The alloc BaseBlockHandler
+// uses decode_dtd_slot directly to preserve upgrade-in-place semantics.
 #[allow(dead_code)]
 pub(super) fn decode_detailed_timings(
     base: &[u8; 128],
     sink: &mut dyn ModeSink,
     options: &DecodeOptions,
-) {
-    for i in 0..4u8 {
-        let offset = 0x36 + (i as usize * 18);
-        decode_dtd_slot_into_sink(&base[offset..offset + 18], sink, Some(0), i, options);
+) -> Option<VideoMode> {
+    let has_preferred = has_preferred_timing(base);
+    let mut preferred = None;
+    let mut index = 0u8;
+    for slot in base[0x36..0x7E].chunks_exact(18) {
+        let decoded = decode_dtd_slot_into_sink(slot, sink, Some(0), index, options);
+        if is_timing_descriptor(slot) {
+            if index == 0 && has_preferred {
+                preferred = decoded;
+            }
+            index += 1;
+        }
     }
+    preferred
+}
+
+/// Whether an 18-byte descriptor slot holds a timing (non-zero pixel clock), not a display
+/// descriptor or padding.
+///
+/// `ModeSource::Dtd { index }` counts these slots within a block, whether or not the timing
+/// then decodes. In the base block that is edid-decode's numbering ("DTD 1" is index 0);
+/// edid-decode carries its count on into extension blocks, piaf restarts it in each block.
+/// A display descriptor before a
+/// timing does not shift its index.
+pub(crate) fn is_timing_descriptor(slot: &[u8]) -> bool {
+    matches!(slot, [lo, hi, ..] if *lo != 0 || *hi != 0)
 }
 
 #[cfg(test)]
 #[cfg(any(feature = "alloc", feature = "std"))]
 mod tests {
     use crate::capabilities::base::BaseBlockHandler;
-    use crate::model::capabilities::{DisplayCapabilities, RefreshRate, VideoMode};
+    use crate::model::capabilities::{DisplayCapabilities, ModeSource, RefreshRate, VideoMode};
     use crate::model::diagnostics::EdidWarning;
     use crate::model::extension::ExtensionHandler;
     use crate::model::options::{DecodeOptions, DtdBorderPolicy, DtdBorderReading};
@@ -541,6 +680,7 @@ mod tests {
     #[test]
     fn test_dtd_interlace_and_image_size() {
         let mut base = [0u8; 128];
+        base[0x13] = 4; // EDID 1.4: the first timing is the preferred timing
 
         // DTD at 0x36: 1920x1080i @ 60Hz (interlaced) with image size 527x296 mm
         // Pixel clock 7425 × 10kHz = 74.25 MHz (halved for interlace field rate)
@@ -651,9 +791,11 @@ mod tests {
         caps
     }
 
-    /// `base_with_bordered_1080p(0, 0)` with the same timing in slot 1, sized 600 × 340 mm.
+    /// `base_with_bordered_1080p(0, 0)` with the same timing in slot 1, sized 600 × 340 mm,
+    /// in an EDID 1.4 base block (which always has a preferred timing).
     fn base_with_sized_second_dtd() -> [u8; 128] {
         let mut base = base_with_bordered_1080p(0, 0);
+        base[0x13] = 4;
         base.copy_within(0x36..0x48, 0x48);
         base[0x48 + 12..0x48 + 15].copy_from_slice(&[0x58, 0x54, 0x21]);
         base
@@ -670,13 +812,155 @@ mod tests {
     }
 
     #[test]
-    fn test_image_size_none_when_first_slot_is_a_display_descriptor() {
+    fn test_preferred_timing_skips_a_display_descriptor_in_slot_0() {
         let mut base = base_with_sized_second_dtd();
         // A display product name descriptor, whose text falls where a DTD's size would be.
         base[0x36..0x48].fill(0);
         base[0x39] = 0xFC;
         base[0x3B..0x48].copy_from_slice(b"Pinball DMD\n ");
-        assert_eq!(decode_base(&base).preferred_image_size_mm, None);
+        let caps = decode_base(&base);
+
+        // The first timing descriptor (slot 1) is the preferred timing, with its size.
+        assert_eq!(caps.preferred_image_size_mm, Some((600, 340)));
+        let preferred = caps.preferred_timing.unwrap();
+        assert_eq!((preferred.width, preferred.height), (1920, 1080));
+        assert_eq!(
+            preferred.source,
+            Some(ModeSource::Dtd { block: 0, index: 0 })
+        );
+    }
+
+    #[test]
+    fn test_preferred_timing_is_the_decoded_first_timing() {
+        let mut base = base_with_bordered_1080p(0, 0);
+        base[0x13] = 4;
+        let caps = decode_base(&base);
+
+        let preferred = caps.preferred_timing.as_ref().unwrap();
+        assert_eq!(preferred.pixel_clock_khz, Some(148_500));
+        assert_eq!(
+            preferred.source,
+            Some(ModeSource::Dtd { block: 0, index: 0 })
+        );
+        // The same mode as in the list.
+        assert_eq!(caps.supported_modes, core::slice::from_ref(preferred));
+    }
+
+    #[test]
+    fn test_undecodable_preferred_timing_is_reported() {
+        let mut base = base_with_bordered_1080p(0, 0);
+        base[0x13] = 4;
+        base[0x36 + 12..0x36 + 15].copy_from_slice(&[0x0F, 0x28, 0x21]); // 527 × 296 mm
+        base[0x38] = 0; // H active 0 (low byte) …
+        base[0x3A] &= 0x0F; // … and high nibble
+        let caps = decode_base(&base);
+
+        assert_eq!(caps.preferred_timing, None);
+        assert_eq!(caps.preferred_image_size_mm, Some((527, 296)));
+        let warnings: Vec<_> = caps
+            .iter_warnings()
+            .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
+            .collect();
+        assert_eq!(
+            warnings,
+            [EdidWarning::DtdGeometryInvalid {
+                h_active: 0,
+                h_blank: 280,
+                v_active: 1080,
+                v_blank: 45
+            }]
+        );
+    }
+
+    fn shape_warning(w: u16, h: u16, interlaced: bool, mm: (u16, u16)) -> Option<(u32, u32)> {
+        let mode = VideoMode::new(w, h, 60u32, interlaced);
+        super::preferred_image_shape_warning(&mode, mm).map(|w| match w {
+            EdidWarning::PreferredImageSizeShapeMismatch {
+                expected_width_mm,
+                expected_height_mm,
+                ..
+            } => (expected_width_mm, expected_height_mm),
+            other => panic!("unexpected {other:?}"),
+        })
+    }
+
+    #[test]
+    fn test_image_shape_matches_the_pixels() {
+        assert_eq!(shape_warning(1920, 1080, false, (527, 296)), None);
+        assert_eq!(shape_warning(3840, 2160, false, (941, 529)), None);
+        // Interlaced: the frame (2 × 540 lines) has the shape, not the field.
+        assert_eq!(shape_warning(1920, 540, true, (527, 296)), None);
+    }
+
+    #[test]
+    fn test_image_shape_mismatch_keeps_one_side() {
+        // PinReady's DMD panel: a 16:10 preferred timing on a 16:9 image area.
+        assert_eq!(
+            shape_warning(1280, 800, false, (575, 323)),
+            Some((516, 323))
+        );
+        assert_eq!(
+            shape_warning(1920, 1080, false, (527, 400)),
+            Some((527, 296))
+        );
+    }
+
+    #[test]
+    fn test_image_shape_not_checked_below_100_mm() {
+        assert_eq!(shape_warning(1920, 1080, false, (99, 400)), None);
+    }
+
+    #[test]
+    fn test_preferred_timing_warnings_are_reported_once() {
+        let mut base = base_with_bordered_1080p(2, 2);
+        base[0x13] = 4;
+        let caps = decode_base(&base);
+
+        assert!(caps.preferred_timing.is_some());
+        assert_eq!(borders_warnings(&caps).len(), 1);
+    }
+
+    #[test]
+    fn test_preferred_timing_takes_over_a_standard_timing_entry() {
+        let mut base = base_with_bordered_1080p(0, 0);
+        base[0x13] = 4;
+        base[0x26] = 209; // standard timing 1920×1080 @ 60 Hz
+        base[0x27] = 0xC0;
+        let caps = decode_base(&base);
+
+        assert_eq!(caps.preferred_timing.as_ref().unwrap().h_front_porch, 88);
+        assert_eq!(caps.supported_modes.len(), 1);
+        assert_eq!(caps.preferred_timing.as_ref(), caps.supported_modes.first());
+    }
+
+    #[test]
+    fn test_preferred_timing_follows_the_edid_version_and_feature_bit() {
+        // (revision, feature byte, has a preferred timing)
+        for (revision, features, preferred) in [
+            (3, 0x00, false), // EDID 1.3 without the bit
+            (3, 0x02, true),  // EDID 1.3 with it
+            (4, 0x00, true),  // EDID 1.4: always (the bit means "native")
+            (4, 0x02, true),
+        ] {
+            let mut base = base_with_sized_second_dtd();
+            base[0x13] = revision;
+            base[0x18] = features;
+            base[0x36 + 12..0x36 + 15].copy_from_slice(&[0x0F, 0x28, 0x21]); // 527 × 296 mm
+            let caps = decode_base(&base);
+
+            assert_eq!(
+                caps.preferred_timing.is_some(),
+                preferred,
+                "1.{revision} {features:#x}"
+            );
+            let size = preferred.then_some((527, 296));
+            assert_eq!(
+                caps.preferred_image_size_mm, size,
+                "1.{revision} {features:#x}"
+            );
+            // The timing itself is decoded either way.
+            assert!(caps.supported_modes.iter().any(|m| m.width == 1920));
+        }
     }
 
     fn borders_warnings(caps: &DisplayCapabilities) -> Vec<EdidWarning> {
