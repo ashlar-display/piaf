@@ -131,7 +131,9 @@ extend beyond the 8-bit range.
 source `Dtd { block: 0, index: 0 }`: EDID 1.4 and later always have one, EDID 1.3 and earlier
 only with the preferred-timing feature bit set (as edid-decode, libdisplay-info and Linux's
 DRM read it). `preferred_image_size_mm` is that descriptor's image size, under the same
-rule. Extension blocks never fill either. Only the base block's handler sets them; a base
+rule. Known gap until each descriptor's own size is decoded: an EDID 1.3 or earlier without
+the feature bit reports no size, even when its first timing descriptor gives one; the
+field's documentation in display-types says where to read it meanwhile. Extension blocks never fill either. Only the base block's handler sets them; a base
 handler that corrects them is registered after it ([extensibility](extensibility.md)).
 
 ### `StaticDisplayCapabilities<const MAX_MODES: usize>` (static pipeline, all tiers)

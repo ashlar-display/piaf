@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whatever the version and feature bit, and `None` when slot 0 held a display descriptor
   even though a later timing was the preferred one. Values change only for EDID 1.3 and
   earlier without the feature bit, and for that layout.
+  For EDID 1.3 and earlier without the feature bit this loses the size, which the first
+  timing descriptor may still give (some EDID 1.3 monitors clear the bit); it comes back
+  when each descriptor's own size is decoded. Until then, `preferred_image_size_mm`'s
+  documentation (display-types) says where to read it.
 
 ### Fixed
 

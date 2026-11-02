@@ -271,7 +271,9 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     ///
     /// More precise than [`screen_size`][Self::screen_size] (which is in cm from the base
     /// block header). `None` when the EDID has no preferred timing or that descriptor gives
-    /// no size (either axis 0). As [`DisplayCapabilities::preferred_image_size_mm`].
+    /// no size (either axis 0). As [`DisplayCapabilities::preferred_image_size_mm`], including
+    /// its known gap: an EDID 1.3 or earlier without the preferred-timing feature bit reports
+    /// no size here, even when its first timing descriptor gives one.
     pub preferred_image_size_mm: Option<(u16, u16)>,
     /// The preferred timing: the base block's first timing descriptor, with its full
     /// timing. EDID 1.4 and later always have one; EDID 1.3 and earlier only with the
