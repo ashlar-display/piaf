@@ -495,3 +495,26 @@ fn cta_dtd_index_counts_timing_descriptors_only() {
     );
     assert_same_modes_as_alloc(&bytes);
 }
+
+/// A custom `StaticExtensionHandler` can report only `EdidWarning`s, so code outside piaf
+/// must be able to construct the struct variants (they are not `#[non_exhaustive]`).
+#[test]
+fn edid_warning_struct_variants_are_constructible_outside_piaf() {
+    let mut caps = StaticDisplayCapabilities::<1>::default();
+    caps.push_warning(EdidWarning::DtdGeometryInvalid {
+        h_active: 0,
+        h_blank: 280,
+        v_active: 1080,
+        v_blank: 45,
+    });
+    caps.push_warning(EdidWarning::PreferredTimingNotInFirstSlot {
+        timing_slot: Some(1),
+    });
+    caps.push_warning(EdidWarning::PreferredImageSizeShapeMismatch {
+        width_mm: 575,
+        height_mm: 323,
+        expected_width_mm: 516,
+        expected_height_mm: 323,
+    });
+    assert_eq!(caps.warnings().len(), 3);
+}

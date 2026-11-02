@@ -102,7 +102,6 @@ pub enum EdidWarning {
     #[error(
         "DTD slot skipped: active {h_active}×{v_active} with blanking {h_blank}×{v_blank} cannot be a timing"
     )]
-    #[non_exhaustive]
     DtdGeometryInvalid {
         /// Horizontal active pixels as stored.
         h_active: u16,
@@ -119,7 +118,6 @@ pub enum EdidWarning {
     /// The preferred timing belongs in the first slot. piaf still takes the base block's
     /// first timing descriptor as the preferred timing, as edid-decode and Linux's DRM do.
     #[error("preferred timing is not in the base block's first descriptor slot")]
-    #[non_exhaustive]
     PreferredTimingNotInFirstSlot {
         /// The slot (1–3) of the base block's first timing descriptor, now the preferred
         /// timing; `None` when the base block holds no timing descriptor.
@@ -131,7 +129,6 @@ pub enum EdidWarning {
     ///
     /// Carries the declared size and the size that would match the pixels; which is right
     /// (non-square pixels, or a wrong size) is the caller's call.
-    #[non_exhaustive]
     #[error(
         "preferred timing's image size {width_mm}×{height_mm} mm does not match its pixel shape (expected {expected_width_mm}×{expected_height_mm} mm)"
     )]
