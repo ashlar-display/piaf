@@ -569,6 +569,9 @@ mod test_static {
 mod tests {
     use super::*;
     use crate::model::capabilities::{DisplayCapabilities, RefreshRate};
+    // Without `std`, `vec!` is not in the prelude.
+    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    use alloc::vec;
 
     #[test]
     fn test_audio_flag() {

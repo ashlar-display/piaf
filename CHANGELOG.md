@@ -76,6 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   descriptors only, as its documentation says and edid-decode numbers them; it changes
   only for EDIDs with that layout.
 
+### Internal
+
+- **CI runs the tests with `alloc` only and the bare `no_std` library tests**, in `ci.yml`
+  and in the `verify` job of `publish.yml`; both configurations were only built for
+  `thumbv7em-none-eabi`. The `alloc`-only tests did not compile (six test modules used
+  `vec!` and `to_string` without the `alloc` imports a build without `std` needs); they
+  import them when `std` is off.
+
 ## [0.5.0] - 2026-10-29
 
 ### Breaking changes

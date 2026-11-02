@@ -350,6 +350,9 @@ mod tests {
     use super::*;
     use crate::model::extension::ExtensionHandler;
     use crate::model::manufacture::ManufacturerId;
+    // Without `std`, `vec!` is not in the prelude.
+    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    use alloc::vec;
 
     // -----------------------------------------------------------------------
     // Shared test helpers
