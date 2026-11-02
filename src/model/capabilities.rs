@@ -138,7 +138,9 @@ impl ModeSink for DisplayCapabilities {
 ///
 /// # Stack size
 ///
-/// At `MAX_MODES = 64` this struct is approximately 3 KB. On targets with very limited stack
+/// Each mode slot takes 56 bytes, and the other fields about 480 bytes on a 32-bit target
+/// (560 on a 64-bit one): at `MAX_MODES = 64` this struct is about 4 KB (4,064 bytes on
+/// `thumbv7em-none-eabi`, 4,144 on x86-64). On targets with very limited stack
 /// space, consider placing the value in a `static mut` or a statically-allocated buffer
 /// rather than on the stack.
 #[non_exhaustive]

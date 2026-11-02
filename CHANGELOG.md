@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The stack-size note for `StaticDisplayCapabilities` said about 3 KB at `MAX_MODES = 64`;
+  it is about 4 KB** (4,064 bytes on `thumbv7em-none-eabi`, 4,144 on x86-64: 56 bytes per
+  mode slot plus the other fields). The note was already low before this release, which
+  adds `preferred_timing` (56 bytes) and the dropped-mode count.
 - **No-alloc builds discarded DTD timings that repeated an earlier mode.**
   `StaticDisplayCapabilities` kept the first mode for a resolution and rate, so a DTD
   after a matching established, standard or VIC entry (base block in bare `no_std`

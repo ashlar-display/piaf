@@ -203,7 +203,9 @@ speaker allocation — those require the alloc pipeline and are available throug
 
 ## Limitations and sizing notes
 
-**Stack size.** At `MAX_MODES = 64`, `StaticDisplayCapabilities` is roughly 3 KB on the stack.
+**Stack size.** Each mode slot takes 56 bytes, and the other fields about 480 bytes on a
+32-bit target (560 on a 64-bit one). At `MAX_MODES = 64`, `StaticDisplayCapabilities` is
+about 4 KB on the stack: 4,064 bytes on `thumbv7em-none-eabi`, 4,144 on x86-64.
 On Cortex-M0 targets with small stacks, place the result in a `static mut` if stack pressure is
 a concern.
 
