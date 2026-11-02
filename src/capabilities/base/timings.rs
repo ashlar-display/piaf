@@ -464,8 +464,10 @@ pub(super) fn decode_detailed_timings(
 /// Whether an 18-byte descriptor slot holds a timing (non-zero pixel clock), not a display
 /// descriptor or padding.
 ///
-/// `ModeSource::Dtd { index }` counts these slots within a block, as edid-decode numbers
-/// them ("DTD 1"), whether or not the timing then decodes: a display descriptor before a
+/// `ModeSource::Dtd { index }` counts these slots within a block, whether or not the timing
+/// then decodes. In the base block that is edid-decode's numbering ("DTD 1" is index 0);
+/// edid-decode carries its count on into extension blocks, piaf restarts it in each block.
+/// A display descriptor before a
 /// timing does not shift its index.
 pub(crate) fn is_timing_descriptor(slot: &[u8]) -> bool {
     matches!(slot, [lo, hi, ..] if *lo != 0 || *hi != 0)

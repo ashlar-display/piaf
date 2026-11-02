@@ -31,7 +31,8 @@ pub const MAX_PARSE_WARNINGS: usize = 8;
 /// `parse_edid_owned` or convert with `ParsedEdid::from(parsed_ref)`.
 ///
 /// Performs length validation, header verification, and checksum verification for the base
-/// block and all declared extension blocks. Extension blocks with tags not known to `tags`
+/// block and all declared extension blocks, and checks that the base block's version byte is
+/// 1 (EDID 1.x; anything else is [`EdidError::UnsupportedVersion`]). Extension blocks with tags not known to `tags`
 /// generate an [`EdidWarning::UnknownExtension`] warning.
 ///
 /// Pass an [`ExtensionLibrary`][crate::ExtensionLibrary], an

@@ -23,6 +23,11 @@ pub trait ModeSink {
     /// timings for the same resolution and rate are both kept), `StaticDisplayCapabilities`
     /// any mode with the same width, height, refresh rate and interlace flag (the first is
     /// kept, except that a DTD-sourced mode replaces a matching entry from another source).
+    ///
+    /// `StaticDisplayCapabilities` recognises a DTD by its source (`ModeSource::Dtd`): a DTD
+    /// decoded without a block number has no source and replaces nothing, whereas
+    /// `DisplayCapabilities`' DTD decoder replaces a matching non-DTD entry either way. The
+    /// built-in pipelines always supply block numbers.
     fn push_mode(&mut self, mode: VideoMode);
     /// Push a non-fatal warning encountered while processing a block.
     fn push_warning(&mut self, w: EdidWarning);

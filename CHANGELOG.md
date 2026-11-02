@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ModeSource::Dtd { index }` counted descriptor slots, not timing descriptors.** A
   display descriptor before a timing (base block or CTA block) shifted the timing's
   index, so the base block's first timing could be `index: 1`. The index now counts timing
-  descriptors only, as its documentation says and edid-decode numbers them; it changes
-  only for EDIDs with that layout.
+  descriptors only, as its documentation says, per block (in the base block, edid-decode's
+  numbering); it changes only for EDIDs with that layout.
 - **No-alloc builds discarded DTD timings that repeated an earlier mode.**
   `StaticDisplayCapabilities` kept the first mode for a resolution and rate, so a DTD
   after a matching established, standard or VIC entry (base block in bare `no_std`

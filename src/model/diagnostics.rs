@@ -116,7 +116,10 @@ pub enum EdidWarning {
     /// hold a timing (edid-decode and libdisplay-info both flag this).
     ///
     /// The preferred timing belongs in the first slot. piaf still takes the base block's
-    /// first timing descriptor as the preferred timing, as edid-decode and Linux's DRM do.
+    /// first timing descriptor as the preferred timing, as edid-decode does. Linux's DRM does
+    /// too, but goes on to the first timing of a CTA-861 or VTB-EXT block when the base block
+    /// has no decodable one; piaf does not, as extension blocks never fill the preferred
+    /// timing.
     #[error("preferred timing is not in the base block's first descriptor slot")]
     PreferredTimingNotInFirstSlot {
         /// The slot (1–3) of the base block's first timing descriptor, now the preferred

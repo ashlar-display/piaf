@@ -185,8 +185,9 @@ impl ExtensionHandler for MyHandler {
 Both contexts also give each block's EDID block number: `block_number(i)` is the number of
 `blocks[i]` (0 for the base block, `n` for the `n`th block after it). The built-in CTA-861
 handler names it in its DTDs' `ModeSource::Dtd { block, index }`, where `index` counts the
-block's timing descriptors (non-zero pixel clock) and skips display descriptors, as
-edid-decode numbers them. The block number is `None` when the
+block's timing descriptors (non-zero pixel clock) and skips display descriptors. In the
+base block that is edid-decode's numbering; edid-decode carries its count on into extension
+blocks, piaf restarts it in each block. The block number is `None` when the
 handler is called without the numbers, as through `HandlerContext::default()`; a handler
 then leaves what depends on them unset rather than guess.
 
