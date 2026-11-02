@@ -254,13 +254,16 @@ the standard.
 
 ## Error and warning model
 
-Errors and warnings are distinct.
+Errors and warnings are distinct. The listing below shows every error and a selection of
+the warnings; the `EdidWarning` API docs list them all.
 
 ```rust
 pub enum EdidError {
     InvalidLength,
     InvalidHeader,
     ChecksumMismatch,
+    /// The version byte is not 1: not EDID 1.x (as libdisplay-info and Linux refuse it).
+    UnsupportedVersion { version: u8 },
 }
 
 pub enum EdidWarning {
@@ -298,6 +301,17 @@ pub enum EdidWarning {
     /// Byte slice length differs from `(1 + extension_count) × 128`.
     /// Extra bytes are ignored; too few is a hard `EdidError::InvalidLength`.
     SizeMismatch { expected: usize, actual: usize },
+    /// A timing descriptor with a pixel clock but a zero active area or blanking.
+    DtdGeometryInvalid { h_active: u16, h_blank: u16, v_active: u16, v_blank: u16 },
+    /// The EDID has a preferred timing, but slot 0 is not a timing.
+    PreferredTimingNotInFirstSlot { timing_slot: Option<u8> },
+    /// EDID 1.3 without the preferred-timing feature bit.
+    PreferredTimingBitClear,
+    /// The preferred timing's image size does not have the shape of its pixels.
+    PreferredImageSizeShapeMismatch {
+        width_mm: u16, height_mm: u16, expected_width_mm: u32, expected_height_mm: u32,
+    },
+    // … and more: see the `EdidWarning` docs.
 }
 ```
 

@@ -61,6 +61,13 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
         return Err(EdidError::ChecksumMismatch);
     }
 
+    // After the checksum: a corrupt block's version byte cannot be trusted.
+    if base_block[0x12] != 1 {
+        return Err(EdidError::UnsupportedVersion {
+            version: base_block[0x12],
+        });
+    }
+
     let extension_count = base_block[126] as usize;
     let total_required = 128 * (1 + extension_count);
 
@@ -153,11 +160,46 @@ mod tests {
         );
     }
 
+    /// A base block with the header, version byte `version` and a valid checksum.
+    fn base_with_version(version: u8) -> [u8; 128] {
+        let mut bytes = [0u8; 128];
+        bytes[0..8].copy_from_slice(&EDID_HEADER);
+        bytes[0x12] = version;
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        bytes
+    }
+
+    #[test]
+    fn test_parse_rejects_a_version_other_than_1() {
+        let registry = ExtensionTagRegistry::new();
+        for version in [0, 2] {
+            assert_eq!(
+                parse_edid(&base_with_version(version), &registry).unwrap_err(),
+                EdidError::UnsupportedVersion { version }
+            );
+        }
+        assert!(parse_edid(&base_with_version(1), &registry).is_ok());
+    }
+
+    #[test]
+    fn test_parse_reports_a_bad_checksum_before_the_version() {
+        let mut bytes = base_with_version(2);
+        bytes[127] = bytes[127].wrapping_add(1);
+        let registry = ExtensionTagRegistry::new();
+        assert_eq!(
+            parse_edid(&bytes, &registry).unwrap_err(),
+            EdidError::ChecksumMismatch
+        );
+    }
+
     #[test]
     fn test_parse_checksum_mismatch() {
         let mut bytes = [0u8; 128];
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[127] = 0x01; // Wrong checksum (should be 6 for all-zeros block with header)
+        bytes[0x12] = 1; // EDID 1.x, with the checksum above adjusted
+        bytes[127] = bytes[127].wrapping_sub(1);
         let registry = ExtensionTagRegistry::new();
         assert_eq!(
             parse_edid(&bytes, &registry).unwrap_err(),
@@ -170,6 +212,8 @@ mod tests {
         let mut bytes = [0u8; 128];
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[127] = 6; // Correct checksum for header + zeros
+        bytes[0x12] = 1; // EDID 1.x, with the checksum above adjusted
+        bytes[127] = bytes[127].wrapping_sub(1);
         let registry = ExtensionTagRegistry::new();
         let result = parse_edid(&bytes, &registry);
         assert!(result.is_ok());
@@ -185,6 +229,8 @@ mod tests {
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[126] = 1; // 1 extension
         bytes[127] = 5; // Checksum for header + extension_count=1
+        bytes[0x12] = 1; // EDID 1.x, with the checksum above adjusted
+        bytes[127] = bytes[127].wrapping_sub(1);
 
         // Extension block
         bytes[128] = 0x02; // Some tag
@@ -205,6 +251,8 @@ mod tests {
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[126] = 1;
         bytes[127] = 5;
+        bytes[0x12] = 1; // EDID 1.x, with the checksum above adjusted
+        bytes[127] = bytes[127].wrapping_sub(1);
         bytes[128] = 0x01;
         bytes[255] = 0x00; // Wrong checksum
         let registry = ExtensionTagRegistry::new();
@@ -220,6 +268,8 @@ mod tests {
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[126] = 1;
         bytes[127] = 5;
+        bytes[0x12] = 1; // EDID 1.x, with the checksum above adjusted
+        bytes[127] = bytes[127].wrapping_sub(1);
 
         // Extension block with tag 0xEE (Unknown)
         bytes[128] = 0xEE;
@@ -238,6 +288,8 @@ mod tests {
         let mut bytes = [0u8; 256];
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[127] = 6; // Correct checksum for header + zeros (no extensions)
+        bytes[0x12] = 1; // EDID 1.x, with the checksum above adjusted
+        bytes[127] = bytes[127].wrapping_sub(1);
         let registry = ExtensionTagRegistry::new();
         let result = parse_edid(&bytes, &registry);
         assert!(result.is_ok());
@@ -258,6 +310,8 @@ mod tests {
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[126] = 1;
         bytes[127] = 5;
+        bytes[0x12] = 1; // EDID 1.x, with the checksum above adjusted
+        bytes[127] = bytes[127].wrapping_sub(1);
 
         // Extension block with tag 0x70 (DisplayID)
         bytes[128] = 0x70;
@@ -279,6 +333,8 @@ mod tests {
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[126] = 1;
         bytes[127] = 5;
+        bytes[0x12] = 1; // EDID 1.x, with the checksum above adjusted
+        bytes[127] = bytes[127].wrapping_sub(1);
 
         // Custom tag 0xEE
         let custom_tag = 0xEE;
@@ -304,6 +360,7 @@ mod tests {
         let declared = MAX_EXTENSION_BLOCKS + 1;
         let mut bytes = [0u8; 128 * (2 + MAX_EXTENSION_BLOCKS)];
         bytes[0..8].copy_from_slice(&EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[126] = declared as u8;
 
         // Fix up base block checksum.
@@ -334,6 +391,7 @@ mod tests {
         const EXTENSIONS: usize = MAX_PARSE_WARNINGS + 2;
         let mut bytes = [0u8; 128 * (1 + EXTENSIONS)];
         bytes[0..8].copy_from_slice(&EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[126] = EXTENSIONS as u8;
         for (i, block) in bytes.chunks_exact_mut(128).enumerate() {
             if i > 0 {
@@ -365,6 +423,8 @@ mod tests {
         let mut bytes = [0u8; 128];
         bytes[0..8].copy_from_slice(&EDID_HEADER);
         bytes[127] = 6;
+        bytes[0x12] = 1; // EDID 1.x, with the checksum above adjusted
+        bytes[127] = bytes[127].wrapping_sub(1);
         let registry = ExtensionTagRegistry::new();
         let owned = parse_edid_owned(&bytes, &registry).unwrap();
         assert_eq!(owned.base_block[0..8], EDID_HEADER);

@@ -509,6 +509,7 @@ mod tests {
     fn test_standard_handlers_are_wired() {
         let mut bytes = [0u8; 128];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[0x14] = 0x80; // Digital input flag
 
         let mut sum = 0u8;
@@ -531,6 +532,7 @@ mod tests {
         use crate::model::diagnostics::EdidWarning;
         let mut bytes = [0u8; 128];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[0x14] = 0x80;
         // DTD at 0x36: 1920×1080, 148.50 MHz, blanking 280 × 45, borders 8 / 2.
         bytes[0x36..0x48].copy_from_slice(&[
@@ -573,6 +575,7 @@ mod static_tests {
     fn edid_with_unknown_extensions() -> [u8; 128 * (1 + EXTENSIONS) + 1] {
         let mut bytes = [0u8; 128 * (1 + EXTENSIONS) + 1];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[126] = EXTENSIONS as u8;
         for (i, block) in bytes.chunks_exact_mut(128).enumerate() {
             if i > 0 {
@@ -589,6 +592,7 @@ mod static_tests {
     pub(super) fn edid_with_tagged_extensions() -> [u8; 512] {
         let mut bytes = [0u8; 512];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[126] = 3;
         for (i, block) in bytes.chunks_exact_mut(128).enumerate() {
             block[0] = match i {
@@ -669,6 +673,7 @@ mod static_tests {
     pub(super) fn edid_with_bordered_dtds() -> [u8; 256] {
         let mut bytes = [0u8; 256];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[0x36..0x48].copy_from_slice(&bordered_dtd(14850, (1920, 280), (1080, 45), 88, 44));
         bytes[126] = 1;
         let ext = &mut bytes[128..];
@@ -966,6 +971,7 @@ mod static_tests {
     fn test_static_pipeline_base_dtd_takes_over_a_standard_timing() {
         let mut bytes = [0u8; 128];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[0x26..0x28].copy_from_slice(&[209, 0xC0]); // standard timing 1920×1080 @ 60 Hz
         bytes[0x36..0x48].copy_from_slice(&[
             0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0x00, 0, 0, 0, 0, 0, 0x1E,
@@ -990,6 +996,7 @@ mod static_tests {
     fn test_dtd_index_counts_timing_descriptors_only() {
         let mut bytes = [0u8; 128];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[0x36..0x3D].copy_from_slice(&[0, 0, 0, 0xFC, 0, b'P', b'A']); // monitor name
         bytes[0x3D] = b'\n';
         bytes[0x48..0x5A].copy_from_slice(&[

@@ -269,4 +269,13 @@ pub enum EdidError {
     /// The checksum byte does not make the block sum to zero.
     #[error("block checksum does not sum to zero")]
     ChecksumMismatch,
+    /// The base block's version byte (`0x12`) is not 1, so it is not laid out as EDID 1.x
+    /// (EDID 2.0 has a different structure; 0 is typical of an unprogrammed EEPROM).
+    /// libdisplay-info and Linux's DRM refuse such a block too, and edid-decode fails it.
+    #[non_exhaustive]
+    #[error("EDID version {version} is not supported (only version 1)")]
+    UnsupportedVersion {
+        /// The version byte as found.
+        version: u8,
+    },
 }

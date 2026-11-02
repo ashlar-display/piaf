@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`parse_edid` rejects a base block whose version byte is not 1**, with the new
+  `EdidError::UnsupportedVersion { version }` (`#[non_exhaustive]`). Such a block is not
+  laid out as EDID 1.x (EDID 2.0 has a different structure; 0 is typical of an unprogrammed
+  EEPROM), and was decoded as if it were. libdisplay-info and Linux's DRM refuse it too, and
+  edid-decode fails it. A corrupt checksum is still reported first.
 - **`preferred_image_size_mm` follows the same rule**: the size in the preferred
   timing's descriptor, `None` when the EDID has no preferred timing. It was slot 0's size
   whatever the version and feature bit, and `None` when slot 0 held a display descriptor

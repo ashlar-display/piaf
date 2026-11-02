@@ -12,6 +12,7 @@ fn load(path: &str) -> Vec<u8> {
 fn minimal_base_edid() -> [u8; 128] {
     let mut bytes = [0u8; 128];
     bytes[0..8].copy_from_slice(&piaf::parser::EDID_HEADER);
+    bytes[0x12] = 1; // EDID 1.x
     // Fix checksum
     let sum: u8 = bytes[..127].iter().fold(0u8, |a, &x| a.wrapping_add(x));
     bytes[127] = 0u8.wrapping_sub(sum);
@@ -22,6 +23,7 @@ fn minimal_base_edid() -> [u8; 128] {
 fn edid_with_cea_vdb(vics: &[u8]) -> Vec<u8> {
     let mut bytes = vec![0u8; 256];
     bytes[0..8].copy_from_slice(&piaf::parser::EDID_HEADER);
+    bytes[0x12] = 1; // EDID 1.x
     bytes[126] = 1; // 1 extension block
 
     // Base block checksum
@@ -146,6 +148,7 @@ fn static_modes_dropped_counts_overflow_not_duplicates() {
 fn test_static_warning_cap() {
     let mut bytes = vec![0u8; 256];
     bytes[0..8].copy_from_slice(&piaf::parser::EDID_HEADER);
+    bytes[0x12] = 1; // EDID 1.x
     bytes[126] = 1;
     let base_sum: u8 = bytes[..127].iter().fold(0u8, |a, &x| a.wrapping_add(x));
     bytes[127] = 0u8.wrapping_sub(base_sum);
