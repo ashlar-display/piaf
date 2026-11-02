@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **`parse_edid` rejects a base block whose version byte is not 1**, with the new
+  `EdidError::UnsupportedVersion { version }` (`#[non_exhaustive]`). Such a block is not
+  laid out as EDID 1.x (EDID 2.0 has a different structure; 0 is typical of an unprogrammed
+  EEPROM), and was decoded as if it were. libdisplay-info and Linux's DRM refuse it too, and
+  edid-decode fails it. A corrupt checksum is still reported first.
+- **`preferred_image_size_mm` follows the preferred timing** (`preferred_timing`, under
+  Added): the size in its descriptor, `None` when the EDID has no preferred timing. It was slot 0's size
+  whatever the version and feature bit, and `None` when slot 0 held a display descriptor
+  even though a later timing was the preferred one. Values change only for EDID 1.3 and
+  earlier without the feature bit, and for that layout.
+  For EDID 1.3 and earlier without the feature bit this loses the size, which the first
+  timing descriptor may still give (some EDID 1.3 monitors clear the bit); it comes back
+  when each descriptor's own size is decoded. Until then, `preferred_image_size_mm`'s
+  documentation (display-types) says where to read it.
+- **`ModeSource::Dtd { index }` counted descriptor slots, not timing descriptors.** A
+  display descriptor before a timing (base block or CTA block) shifted the timing's
+  index, so the base block's first timing could be `index: 1`. The index now counts timing
+  descriptors only, as its documentation says and edid-decode numbers them; it changes
+  only for EDIDs with that layout.
+- **No-alloc builds discarded DTD timings that repeated an earlier mode.**
+  `StaticDisplayCapabilities` kept the first mode for a resolution and rate, so a DTD
+  after a matching established, standard or VIC entry (base block in bare `no_std`
+  builds, the CTA block's DTDs in every build) was dropped with its pixel clock, blanking
+  and source. A DTD now replaces such an entry, as `DisplayCapabilities` does; an earlier
+  DTD's entry is kept. The entry's source changes with it: a mode that was
+  `ModeSource::Vic(n)` in `StaticDisplayCapabilities` is now `ModeSource::Dtd { .. }` when a
+  DTD repeats it (established and standard timings had no source). The no-alloc output
+  keeps no other record of that VIC; `DisplayCapabilities` has always behaved this way, with
+  the VIC still in `Cea861Capabilities::vics`. Code that matched on `Vic` for such a mode no
+  longer finds it.
+
 ### Added
 
 - **`StaticDisplayCapabilities::modes_dropped()`** counts the modes that did not fit in
@@ -44,50 +77,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a breaking release: match them with `..`; code outside piaf cannot construct
   them. The older struct variants follow at piaf's next breaking release.
 
-### Changed
-
-- **`parse_edid` rejects a base block whose version byte is not 1**, with the new
-  `EdidError::UnsupportedVersion { version }` (`#[non_exhaustive]`). Such a block is not
-  laid out as EDID 1.x (EDID 2.0 has a different structure; 0 is typical of an unprogrammed
-  EEPROM), and was decoded as if it were. libdisplay-info and Linux's DRM refuse it too, and
-  edid-decode fails it. A corrupt checksum is still reported first.
-- **`preferred_image_size_mm` follows the same rule**: the size in the preferred
-  timing's descriptor, `None` when the EDID has no preferred timing. It was slot 0's size
-  whatever the version and feature bit, and `None` when slot 0 held a display descriptor
-  even though a later timing was the preferred one. Values change only for EDID 1.3 and
-  earlier without the feature bit, and for that layout.
-  For EDID 1.3 and earlier without the feature bit this loses the size, which the first
-  timing descriptor may still give (some EDID 1.3 monitors clear the bit); it comes back
-  when each descriptor's own size is decoded. Until then, `preferred_image_size_mm`'s
-  documentation (display-types) says where to read it.
-
 ### Fixed
 
 - **The stack-size note for `StaticDisplayCapabilities` said about 3 KB at `MAX_MODES = 64`;
   it is about 4 KB** (4,064 bytes on `thumbv7em-none-eabi`, 4,144 on x86-64: 56 bytes per
   mode slot plus the other fields). The note was already low before this release, which
   adds `preferred_timing` (56 bytes) and the dropped-mode count.
-- **No-alloc builds discarded DTD timings that repeated an earlier mode.**
-  `StaticDisplayCapabilities` kept the first mode for a resolution and rate, so a DTD
-  after a matching established, standard or VIC entry (base block in bare `no_std`
-  builds, the CTA block's DTDs in every build) was dropped with its pixel clock, blanking
-  and source. A DTD now replaces such an entry, as `DisplayCapabilities` does; an earlier
-  DTD's entry is kept. The entry's source changes with it: a mode that was
-  `ModeSource::Vic(n)` in `StaticDisplayCapabilities` is now `ModeSource::Dtd { .. }` when a
-  DTD repeats it (established and standard timings had no source). The no-alloc output
-  keeps no other record of that VIC; `DisplayCapabilities` has always behaved this way, with
-  the VIC still in `Cea861Capabilities::vics`. Code that matched on `Vic` for such a mode no
-  longer finds it.
 - **`StaticDisplayCapabilities` ordered the base block's warnings differently with
   `alloc`.** With `alloc` the DTD warnings came before `InvalidManufacturerId` (and now the
   preferred-timing warnings); in bare `no_std` after them. With only
   `MAX_STATIC_WARNINGS` kept, a full list could hold different warnings per build. Both
   now report the header and preferred-timing warnings first, then the DTDs'.
-- **`ModeSource::Dtd { index }` counted descriptor slots, not timing descriptors.** A
-  display descriptor before a timing (base block or CTA block) shifted the timing's
-  index, so the base block's first timing could be `index: 1`. The index now counts timing
-  descriptors only, as its documentation says and edid-decode numbers them; it changes
-  only for EDIDs with that layout.
 
 ### Internal
 
