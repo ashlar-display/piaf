@@ -990,6 +990,9 @@ pub(super) fn parse_vtb_ext(
 mod tests {
     use super::*;
     use crate::model::capabilities::RefreshRate;
+    // Without `std`, `vec!` is not in the prelude.
+    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    use alloc::vec;
 
     #[test]
     fn test_video_capability() {

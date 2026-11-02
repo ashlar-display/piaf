@@ -8,7 +8,7 @@ PIAF reads and interprets EDID data as an input to display capability discovery.
 
 The library covers:
 
-- parsing and validation of raw byte slices — header verification, checksum, and block structure,
+- parsing and validation of raw byte slices — header verification, checksum, EDID version (1.x only), and block structure,
 - full decoding of the EDID base block into typed fields,
 - extension block dispatch via a pluggable handler system,
 - full CEA-861 extension decoding covering all major data block types,
@@ -90,6 +90,7 @@ The parser is responsible for:
 - validating expected block sizes,
 - checking structural markers,
 - verifying checksums,
+- checking the EDID version (1.x only),
 - decoding known fields into structured Rust types.
 
 The parser should avoid embedding higher-level policy decisions where possible.

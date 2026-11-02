@@ -66,6 +66,12 @@ let mut library = ExtensionLibrary::with_standard_handlers();
 library.add_base_handler(MyBaseHandler);
 ```
 
+The built-in `BaseBlockHandler` (the first one in `with_standard_handlers`) sets
+`preferred_timing` and `preferred_image_size_mm` every time it runs, replacing any earlier
+value. A handler that corrects them, such as a quirk fix for a display whose first DTD is
+wrong, must be registered after it, as above; one registered before it is overwritten.
+Extension block handlers leave both alone.
+
 ### Registering an extension block handler (dynamic pipeline)
 
 Extension block handlers are registered per tag via `ExtensionMetadata`.
@@ -178,7 +184,10 @@ impl ExtensionHandler for MyHandler {
 
 Both contexts also give each block's EDID block number: `block_number(i)` is the number of
 `blocks[i]` (0 for the base block, `n` for the `n`th block after it). The built-in CTA-861
-handler names it in its DTDs' `ModeSource::Dtd { block, index }`. It is `None` when the
+handler names it in its DTDs' `ModeSource::Dtd { block, index }`, where `index` counts the
+block's timing descriptors (non-zero pixel clock) and skips display descriptors. In the
+base block that is edid-decode's numbering; edid-decode carries its count on into extension
+blocks, piaf restarts it in each block. The block number is `None` when the
 handler is called without the numbers, as through `HandlerContext::default()`; a handler
 then leaves what depends on them unset rather than guess.
 

@@ -141,9 +141,12 @@ pub fn capabilities_from_edid_with_options<T: EdidSource>(
 
     #[cfg(not(any(feature = "alloc", feature = "std")))]
     {
-        // The base block's decoded fields do not depend on the options.
-        let _ = (library, options);
+        // No handlers without `alloc`: the base block is decoded directly. The options
+        // reach the preferred timing, the one decoded mode this output holds.
+        let _ = library;
         base::decode_base_block(edid.base_block(), &mut caps, &mut NullSink);
+        caps.preferred_timing =
+            base::decode_preferred_timing(edid.base_block(), &options, &mut NullSink);
     }
 
     caps
@@ -152,7 +155,8 @@ pub fn capabilities_from_edid_with_options<T: EdidSource>(
 /// Derives [`StaticDisplayCapabilities`] from any [`EdidSource`] without heap allocation.
 ///
 /// `N` is the maximum number of video modes the result can hold; 64 is a reasonable default
-/// for most displays. Modes beyond `N` are silently dropped; warnings beyond
+/// for most displays. Modes beyond `N` are counted in
+/// [`modes_dropped`][StaticDisplayCapabilities::modes_dropped]; warnings beyond
 /// [`MAX_STATIC_WARNINGS`][crate::MAX_STATIC_WARNINGS] are counted in
 /// [`warnings_dropped`][StaticDisplayCapabilities::warnings_dropped].
 ///
@@ -213,8 +217,11 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
         );
         // base_caps now holds scalar fields, preferred_image_size_mm, and supported_modes.
         // The base block's warnings are `EdidWarning`s behind `Arc<dyn Error>`; copy them
-        // into the static output, as the bare no_std path below records them directly.
-        for warning in base_caps.warnings.iter().chain(w.iter()) {
+        // into the static output, as the bare no_std path below records them directly. In
+        // the same order as that path (header and preferred-timing warnings, collected in
+        // `w`, before the DTDs'), so a full warning list keeps the same warnings in every
+        // build.
+        for warning in w.iter().chain(base_caps.warnings.iter()) {
             if let Some(&edid_warning) =
                 (**warning).downcast_ref::<crate::model::diagnostics::EdidWarning>()
             {
@@ -255,6 +262,8 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
     caps.max_h_rate_khz = base_caps.max_h_rate_khz;
     caps.max_pixel_clock_mhz = base_caps.max_pixel_clock_mhz;
     caps.preferred_image_size_mm = base_caps.preferred_image_size_mm;
+    // Set by BaseBlockHandler with alloc; in bare no_std builds by decode_base_modes (step 3).
+    caps.preferred_timing = base_caps.preferred_timing;
     caps.timing_formula = base_caps.timing_formula;
     caps.color_management = base_caps.color_management;
 
@@ -270,7 +279,13 @@ pub fn capabilities_from_edid_static_with_options<const N: usize, T: EdidSource>
     #[cfg(not(any(feature = "alloc", feature = "std")))]
     {
         // No supported_modes in bare no_std DisplayCapabilities; call ungated functions directly.
-        base::decode_base_modes(parsed.base_block(), &mut caps, &options);
+        caps.preferred_timing = base::decode_base_modes(parsed.base_block(), &mut caps, &options);
+        // After the DTDs' warnings, as BaseBlockHandler reports it with `alloc`.
+        if let (Some(mode), Some(size)) = (&caps.preferred_timing, caps.preferred_image_size_mm) {
+            if let Some(w) = base::preferred_image_shape_warning(mode, size) {
+                caps.push_warning(w);
+            }
+        }
     }
 
     // Step 4 — Dispatch extension blocks to the static handler slice.
@@ -497,6 +512,7 @@ mod tests {
     fn test_standard_handlers_are_wired() {
         let mut bytes = [0u8; 128];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[0x14] = 0x80; // Digital input flag
 
         let mut sum = 0u8;
@@ -519,6 +535,7 @@ mod tests {
         use crate::model::diagnostics::EdidWarning;
         let mut bytes = [0u8; 128];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[0x14] = 0x80;
         // DTD at 0x36: 1920×1080, 148.50 MHz, blanking 280 × 45, borders 8 / 2.
         bytes[0x36..0x48].copy_from_slice(&[
@@ -561,6 +578,7 @@ mod static_tests {
     fn edid_with_unknown_extensions() -> [u8; 128 * (1 + EXTENSIONS) + 1] {
         let mut bytes = [0u8; 128 * (1 + EXTENSIONS) + 1];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[126] = EXTENSIONS as u8;
         for (i, block) in bytes.chunks_exact_mut(128).enumerate() {
             if i > 0 {
@@ -577,6 +595,7 @@ mod static_tests {
     pub(super) fn edid_with_tagged_extensions() -> [u8; 512] {
         let mut bytes = [0u8; 512];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[126] = 3;
         for (i, block) in bytes.chunks_exact_mut(128).enumerate() {
             block[0] = match i {
@@ -657,6 +676,7 @@ mod static_tests {
     pub(super) fn edid_with_bordered_dtds() -> [u8; 256] {
         let mut bytes = [0u8; 256];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
         bytes[0x36..0x48].copy_from_slice(&bordered_dtd(14850, (1920, 280), (1080, 45), 88, 44));
         bytes[126] = 1;
         let ext = &mut bytes[128..];
@@ -677,6 +697,7 @@ mod static_tests {
     pub(super) fn edid_with_repeated_preferred_dtd() -> [u8; 256] {
         let mut bytes = [0u8; 256];
         bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12..0x14].copy_from_slice(&[1, 4]); // EDID 1.4: base DTD 0 is preferred
         let preferred = bordered_dtd(14850, (1920, 280), (1080, 45), 88, 44);
         bytes[0x36..0x48].copy_from_slice(&preferred);
         bytes[126] = 1;
@@ -721,6 +742,394 @@ mod static_tests {
             (1920, 2, Some(ModeSource::Dtd { block: 0, index: 0 })),
             (2560, 2, Some(ModeSource::Dtd { block: 1, index: 1 })),
         ]));
+    }
+
+    fn with_checksums(mut bytes: [u8; 256]) -> [u8; 256] {
+        for block in bytes.chunks_exact_mut(128) {
+            let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            block[127] = 0u8.wrapping_sub(sum);
+        }
+        bytes
+    }
+
+    // The preferred timing in the static pipeline: these run in every build, bare `no_std`
+    // included, where it comes from `decode_base_modes` rather than `BaseBlockHandler`.
+
+    #[test]
+    fn test_static_pipeline_sets_the_preferred_timing() {
+        let bytes = edid_with_repeated_preferred_dtd();
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        let preferred = caps.preferred_timing.as_ref().unwrap();
+        assert_eq!((preferred.width, preferred.h_border), (1920, 2));
+        assert_eq!(
+            preferred.source,
+            Some(ModeSource::Dtd { block: 0, index: 0 })
+        );
+        assert!(caps.iter_modes().any(|m| m == preferred));
+        // Its border warning is reported once, not once per use.
+        assert_eq!(ambiguous_warnings(&caps), 1);
+    }
+
+    #[test]
+    fn test_static_pipeline_no_preferred_timing_in_edid_1_3_without_the_bit() {
+        let mut bytes = edid_with_repeated_preferred_dtd();
+        bytes[0x13] = 3;
+        bytes[0x36 + 12..0x36 + 15].copy_from_slice(&[0x3F, 0x43, 0x21]); // 575 × 323 mm
+        let bytes = with_checksums(bytes);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        assert_eq!(caps.preferred_timing, None);
+        assert_eq!(caps.preferred_image_size_mm, None);
+        assert!(caps.iter_modes().any(|m| m.width == 1920)); // still decoded as a mode
+    }
+
+    #[test]
+    fn test_static_pipeline_keeps_the_preferred_timing_when_the_mode_list_is_full() {
+        let mut bytes = edid_with_repeated_preferred_dtd();
+        bytes[0x23] = 0b0000_0001; // established 800×600 @ 60 Hz, decoded before the DTD
+        let bytes = with_checksums(bytes);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<1, _>(&parsed, &[]);
+
+        assert_eq!(caps.num_modes, 1);
+        assert!(caps.iter_modes().all(|m| m.width == 800));
+        assert_eq!(caps.preferred_timing.map(|m| m.width), Some(1920));
+    }
+
+    /// A base block of the given EDID revision and feature byte, with a 1920×1080 timing in
+    /// `timing_slot` (if any) and a monitor name in every other slot before it.
+    fn base_with_timing_in(revision: u8, features: u8, timing_slot: Option<usize>) -> [u8; 128] {
+        let mut bytes = [0u8; 128];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12..0x14].copy_from_slice(&[1, revision]);
+        bytes[0x18] = features;
+        let slots = timing_slot.unwrap_or(4);
+        for slot in 0..slots {
+            let o = 0x36 + slot * 18;
+            bytes[o..o + 5].copy_from_slice(&[0, 0, 0, 0xFC, 0]); // monitor name
+            bytes[o + 5] = b'\n';
+        }
+        if let Some(slot) = timing_slot {
+            let o = 0x36 + slot * 18;
+            bytes[o..o + 18].copy_from_slice(&bordered_dtd(14850, (1920, 280), (1080, 45), 88, 44));
+            bytes[o + 15] = 0; // no borders
+        }
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        bytes
+    }
+
+    /// The preferred-timing warnings the static pipeline reports for `bytes`.
+    fn preferred_timing_warnings(bytes: &[u8; 128]) -> ([Option<EdidWarning>; 2], usize) {
+        let parsed = parse_edid(bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+        let mut found = [None; 2];
+        let mut n = 0;
+        for w in caps.iter_warnings().filter(|w| {
+            matches!(
+                w,
+                EdidWarning::PreferredTimingNotInFirstSlot { .. }
+                    | EdidWarning::PreferredTimingBitClear
+            )
+        }) {
+            if n < 2 {
+                found[n] = Some(*w);
+            }
+            n += 1;
+        }
+        (found, n)
+    }
+
+    #[test]
+    fn test_static_pipeline_reports_an_undecodable_preferred_timing() {
+        let mut bytes = base_with_timing_in(4, 0, Some(0));
+        bytes[0x3B] = 0; // V active 0 (low byte) …
+        bytes[0x3D] &= 0x0F; // … and high nibble
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        assert_eq!(caps.preferred_timing, None);
+        let expected = EdidWarning::DtdGeometryInvalid {
+            h_active: 1920,
+            h_blank: 280,
+            v_active: 0,
+            v_blank: 45,
+        };
+        assert_eq!(caps.iter_warnings().filter(|w| **w == expected).count(), 1);
+    }
+
+    /// The base block's warnings come in the same order with and without `alloc`, so a
+    /// full warning list keeps the same ones in every build.
+    #[test]
+    fn test_static_pipeline_orders_base_warnings_the_same_in_every_build() {
+        // Manufacturer ID all zero (invalid), timing in slot 1, with a 2-pixel border.
+        let mut bytes = base_with_timing_in(4, 0, Some(1));
+        bytes[0x48 + 15] = 2;
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        assert_eq!(
+            caps.warnings(),
+            [
+                EdidWarning::InvalidManufacturerId,
+                EdidWarning::PreferredTimingNotInFirstSlot {
+                    timing_slot: Some(1)
+                },
+                EdidWarning::DtdBordersAmbiguous {
+                    h_border: 2,
+                    v_border: 0
+                },
+            ]
+        );
+    }
+
+    /// Runs in every build: `capabilities_from_edid` reports the preferred timing too, in
+    /// bare `no_std` decoded on its own, with the caller's options.
+    #[test]
+    fn test_capabilities_from_edid_sets_the_preferred_timing_in_every_build() {
+        use crate::model::options::{DtdBorderPolicy, DtdBorderReading};
+
+        let bytes = edid_with_repeated_preferred_dtd();
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        let library = ExtensionLibrary::with_standard_handlers();
+        #[cfg(not(any(feature = "alloc", feature = "std")))]
+        let library = ExtensionLibrary::new();
+
+        let caps = capabilities_from_edid(&parsed, &library);
+        let preferred = caps.preferred_timing.as_ref().unwrap();
+        assert_eq!((preferred.width, preferred.h_border), (1920, 2));
+        assert_eq!(
+            preferred.source,
+            Some(ModeSource::Dtd { block: 0, index: 0 })
+        );
+        let from_static = capabilities_from_edid_static::<8, _>(&parsed, &[]).preferred_timing;
+        assert_eq!(caps.preferred_timing, from_static);
+
+        let options = DecodeOptions::new()
+            .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
+        let caps = capabilities_from_edid_with_options(&parsed, &library, options);
+        let reading = caps.preferred_timing.and_then(|m| m.dtd_border_reading);
+        assert_eq!(reading, Some(DtdBorderReading::Edid14));
+    }
+
+    /// Runs in every build: the shape warning comes after the DTDs' warnings.
+    #[test]
+    fn test_static_pipeline_reports_an_image_size_of_the_wrong_shape() {
+        let mut bytes = base_with_timing_in(4, 0, Some(0));
+        bytes[0x36 + 12..0x36 + 15].copy_from_slice(&[0x0F, 0x90, 0x21]); // 527 × 400 mm
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        assert_eq!(
+            caps.warnings(),
+            [
+                EdidWarning::InvalidManufacturerId,
+                EdidWarning::PreferredImageSizeShapeMismatch {
+                    width_mm: 527,
+                    height_mm: 400,
+                    expected_width_mm: 527,
+                    expected_height_mm: 296,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_warns_when_the_preferred_timing_is_not_in_slot_0() {
+        let (found, n) = preferred_timing_warnings(&base_with_timing_in(4, 0, Some(1)));
+        assert_eq!(n, 1);
+        let expected = EdidWarning::PreferredTimingNotInFirstSlot {
+            timing_slot: Some(1),
+        };
+        assert_eq!(found[0], Some(expected));
+
+        let (found, n) = preferred_timing_warnings(&base_with_timing_in(4, 0, None));
+        assert_eq!(n, 1);
+        let expected = EdidWarning::PreferredTimingNotInFirstSlot { timing_slot: None };
+        assert_eq!(found[0], Some(expected));
+    }
+
+    #[test]
+    fn test_warns_for_edid_1_3_without_the_preferred_timing_bit() {
+        let (found, n) = preferred_timing_warnings(&base_with_timing_in(3, 0, Some(0)));
+        assert_eq!(
+            (found[0], n),
+            (Some(EdidWarning::PreferredTimingBitClear), 1)
+        );
+        // Only once, not also for the slot: without the bit there is no preferred timing.
+        let (_, n) = preferred_timing_warnings(&base_with_timing_in(3, 0, Some(1)));
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn test_no_preferred_timing_warning_where_none_is_due() {
+        for (revision, features) in [(4, 0x00), (4, 0x02), (3, 0x02), (2, 0x00)] {
+            let (_, n) =
+                preferred_timing_warnings(&base_with_timing_in(revision, features, Some(0)));
+            assert_eq!(n, 0, "1.{revision} {features:#x}");
+        }
+    }
+
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    #[test]
+    fn test_preferred_timing_warnings_reach_display_capabilities() {
+        let bytes = base_with_timing_in(4, 0, Some(2));
+        let library = ExtensionLibrary::with_standard_handlers();
+        let caps = capabilities_from_edid(&parse_edid(&bytes, &library).unwrap(), &library);
+        let expected = EdidWarning::PreferredTimingNotInFirstSlot {
+            timing_slot: Some(2),
+        };
+        let found: Vec<_> = caps
+            .iter_warnings()
+            .filter_map(|w| (**w).downcast_ref::<EdidWarning>().copied())
+            .filter(|w| *w == expected)
+            .collect();
+        assert_eq!(found, [expected]);
+        assert_eq!(caps.preferred_timing.map(|m| m.width), Some(1920));
+    }
+
+    /// Runs in every build, bare `no_std` included, where the base block's modes go
+    /// through `StaticDisplayCapabilities`' own sink rather than `BaseBlockHandler`.
+    #[test]
+    fn test_static_pipeline_base_dtd_takes_over_a_standard_timing() {
+        let mut bytes = [0u8; 128];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
+        bytes[0x26..0x28].copy_from_slice(&[209, 0xC0]); // standard timing 1920×1080 @ 60 Hz
+        bytes[0x36..0x48].copy_from_slice(&[
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0x00, 0, 0, 0, 0, 0, 0x1E,
+        ]); // the same mode as a DTD, 148.5 MHz
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+
+        let mut entries = caps
+            .iter_modes()
+            .filter(|m| m.width == 1920 && m.height == 1080);
+        let entry = entries.next().unwrap();
+        assert!(entries.next().is_none());
+        assert_eq!(entry.pixel_clock_khz, Some(148_500));
+        assert_eq!(entry.source, Some(ModeSource::Dtd { block: 0, index: 0 }));
+    }
+
+    /// A display descriptor before the base block's first timing does not shift its
+    /// index: `Dtd { index }` counts timing descriptors, as edid-decode numbers them.
+    #[test]
+    fn test_dtd_index_counts_timing_descriptors_only() {
+        let mut bytes = [0u8; 128];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1; // EDID 1.x
+        bytes[0x36..0x3D].copy_from_slice(&[0, 0, 0, 0xFC, 0, b'P', b'A']); // monitor name
+        bytes[0x3D] = b'\n';
+        bytes[0x48..0x5A].copy_from_slice(&[
+            0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 88, 44, 0x45, 0x00, 0, 0, 0, 0, 0, 0x1E,
+        ]); // 1920×1080 @ 60 Hz in slot 1
+        let sum = bytes[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        bytes[127] = 0u8.wrapping_sub(sum);
+        let first_dtd = Some(ModeSource::Dtd { block: 0, index: 0 });
+
+        let parsed = parse_edid(&bytes, &ExtensionTagRegistry::new()).unwrap();
+        let caps = capabilities_from_edid_static::<8, _>(&parsed, &[]);
+        let mut dtds = caps.iter_modes().filter(|m| m.width == 1920);
+        assert_eq!(dtds.next().unwrap().source, first_dtd);
+        assert!(dtds.next().is_none());
+
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        {
+            let library = ExtensionLibrary::with_standard_handlers();
+            let caps = capabilities_from_edid(&parse_edid(&bytes, &library).unwrap(), &library);
+            let sources: Vec<_> = caps
+                .supported_modes
+                .iter()
+                .filter(|m| m.width == 1920)
+                .map(|m| m.source)
+                .collect();
+            assert_eq!(sources, [first_dtd]);
+        }
+    }
+
+    /// `BaseBlockHandler` sets the preferred timing every time: a base handler registered
+    /// after it can correct it (a quirk fix), one registered before it is overwritten.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    #[test]
+    fn test_a_later_base_handler_can_correct_the_preferred_timing() {
+        use crate::model::extension::ExtensionHandler;
+        #[derive(Debug)]
+        struct Quirk;
+        impl ExtensionHandler for Quirk {
+            fn process(
+                &self,
+                _: &[&[u8; 128]],
+                caps: &mut DisplayCapabilities,
+                _: &mut Vec<ParseWarning>,
+            ) {
+                caps.preferred_timing = Some(VideoMode::new(640, 480, 60u32, false));
+            }
+        }
+        let bytes = edid_with_repeated_preferred_dtd();
+        let width = |library: &ExtensionLibrary| {
+            let parsed = parse_edid(&bytes, library).unwrap();
+            capabilities_from_edid(&parsed, library)
+                .preferred_timing
+                .map(|m| m.width)
+        };
+
+        let mut after = ExtensionLibrary::with_standard_handlers();
+        after.add_base_handler(Quirk);
+        assert_eq!(width(&after), Some(640));
+
+        let mut before = ExtensionLibrary::new();
+        before.add_base_handler(Quirk);
+        before.add_base_handler(base::BaseBlockHandler);
+        assert_eq!(width(&before), Some(1920));
+    }
+
+    /// PinReady's DMD panel: 1280×800 in the base block, 1280×720 in the CTA block. Only
+    /// the base block's timing is the preferred timing, and no extension DTD stands in for
+    /// a missing one.
+    #[cfg(any(feature = "alloc", feature = "std"))]
+    #[test]
+    fn test_preferred_timing_comes_from_the_base_block_only() {
+        let mut bytes = [0u8; 256];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12..0x14].copy_from_slice(&[1, 3]);
+        bytes[0x18] = 0x0A; // preferred-timing bit set
+        bytes[0x36..0x48].copy_from_slice(&bordered_dtd(7100, (1280, 160), (800, 23), 48, 32));
+        bytes[0x36 + 15] = 0;
+        bytes[126] = 1;
+        bytes[128..132].copy_from_slice(&[0x02, 0x03, 4, 0]); // DTDs from byte 4
+        bytes[132..150].copy_from_slice(&bordered_dtd(7425, (1280, 370), (720, 30), 110, 40));
+        bytes[132 + 15] = 0;
+        let checksum = |bytes: &mut [u8; 256]| {
+            for block in bytes.chunks_exact_mut(128) {
+                let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+                block[127] = 0u8.wrapping_sub(sum);
+            }
+        };
+        checksum(&mut bytes);
+        let library = ExtensionLibrary::with_standard_handlers();
+        let decode =
+            |bytes: &[u8]| capabilities_from_edid(&parse_edid(bytes, &library).unwrap(), &library);
+
+        let preferred = decode(&bytes).preferred_timing.unwrap();
+        assert_eq!((preferred.width, preferred.height), (1280, 800));
+
+        bytes[0x36..0x48].fill(0); // no base timing: the CTA DTD does not stand in
+        checksum(&mut bytes);
+        let caps = decode(&bytes);
+        assert_eq!(caps.preferred_timing, None);
+        assert!(caps.supported_modes.iter().any(|m| m.height == 720));
     }
 
     // VTB-EXT is decoded in alloc builds only.

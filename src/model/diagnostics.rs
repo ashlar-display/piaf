@@ -93,6 +93,65 @@ pub enum EdidWarning {
         /// Horizontal sync pulse width, in pixels.
         h_sync_width: u16,
     },
+    /// A Detailed Timing Descriptor slot was skipped because it has a pixel clock (so it
+    /// is a timing, not a display descriptor) but a zero active area or blanking, which no
+    /// timing can have. The raw values are kept.
+    ///
+    /// If it is the preferred timing, `preferred_timing` is `None` while
+    /// `preferred_image_size_mm` may still hold the descriptor's size.
+    #[error(
+        "DTD slot skipped: active {h_active}×{v_active} with blanking {h_blank}×{v_blank} cannot be a timing"
+    )]
+    DtdGeometryInvalid {
+        /// Horizontal active pixels as stored.
+        h_active: u16,
+        /// Horizontal blanking as stored, in pixels.
+        h_blank: u16,
+        /// Vertical active lines as stored.
+        v_active: u16,
+        /// Vertical blanking as stored, in lines.
+        v_blank: u16,
+    },
+    /// The EDID has a preferred timing, but the base block's first descriptor slot does not
+    /// hold a timing (edid-decode and libdisplay-info both flag this).
+    ///
+    /// The preferred timing belongs in the first slot. piaf still takes the base block's
+    /// first timing descriptor as the preferred timing, as edid-decode does. Linux's DRM does
+    /// too, but goes on to the first timing of a CTA-861 or VTB-EXT block when the base block
+    /// has no decodable one; piaf does not, as extension blocks never fill the preferred
+    /// timing.
+    #[error("preferred timing is not in the base block's first descriptor slot")]
+    PreferredTimingNotInFirstSlot {
+        /// The slot (1–3) of the base block's first timing descriptor, now the preferred
+        /// timing; `None` when the base block holds no timing descriptor.
+        timing_slot: Option<u8>,
+    },
+    /// The preferred timing's image size does not have the shape of its pixels: the size
+    /// expected from one side and the pixel aspect ratio differs from the other side by
+    /// more than 10 mm (edid-decode's check and tolerance). Not checked below 100 × 100 mm.
+    ///
+    /// Carries the declared size and the size that would match the pixels; which is right
+    /// (non-square pixels, or a wrong size) is the caller's call.
+    #[error(
+        "preferred timing's image size {width_mm}×{height_mm} mm does not match its pixel shape (expected {expected_width_mm}×{expected_height_mm} mm)"
+    )]
+    PreferredImageSizeShapeMismatch {
+        /// Declared image width, in millimetres.
+        width_mm: u16,
+        /// Declared image height, in millimetres.
+        height_mm: u16,
+        /// Width matching the pixel aspect ratio, in millimetres (one side is kept).
+        expected_width_mm: u32,
+        /// Height matching the pixel aspect ratio, in millimetres (one side is kept).
+        expected_height_mm: u32,
+    },
+    /// An EDID 1.3 base block has the preferred-timing feature bit (byte `0x18`, bit 1)
+    /// clear, which EDID 1.3 requires to be set (edid-decode flags this).
+    ///
+    /// piaf reports no preferred timing, as the bit says; the base block's timings are
+    /// still decoded as modes.
+    #[error("EDID 1.3 base block without the preferred-timing feature bit")]
+    PreferredTimingBitClear,
     /// An HDMI Audio Data Block declares MS NonMixed support with a maximum stream count of
     /// one (edid-decode and libdisplay-info both flag this). The flag is kept as declared.
     #[error("HDMI Audio Data Block: MS NonMixed support declared with a single stream")]
@@ -210,4 +269,13 @@ pub enum EdidError {
     /// The checksum byte does not make the block sum to zero.
     #[error("block checksum does not sum to zero")]
     ChecksumMismatch,
+    /// The base block's version byte (`0x12`) is not 1, so it is not laid out as EDID 1.x
+    /// (EDID 2.0 has a different structure; 0 is typical of an unprogrammed EEPROM).
+    /// libdisplay-info and Linux's DRM refuse such a block too, and edid-decode fails it.
+    #[non_exhaustive]
+    #[error("EDID version {version} is not supported (only version 1)")]
+    UnsupportedVersion {
+        /// The version byte as found.
+        version: u8,
+    },
 }

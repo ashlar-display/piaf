@@ -95,6 +95,7 @@ pub struct DisplayCapabilities {
     pub max_h_rate_khz: Option<u16>,
     pub max_pixel_clock_mhz: Option<u16>,
     pub timing_formula: Option<TimingFormula>,
+    pub preferred_timing: Option<VideoMode>, // every build, unlike supported_modes
     // alloc/std only:
     pub supported_modes: Vec<VideoMode>,
     // Panel (from DisplayID, alloc/std only):
@@ -126,6 +127,15 @@ Rate fields (`min_v_rate`, `max_v_rate`, `min_h_rate_khz`, `max_h_rate_khz`) are
 rather than `u8` because the `0xFD` range limits descriptor can add a 255-unit offset to
 extend beyond the 8-bit range.
 
+`preferred_timing` is the base block's first timing descriptor, with its full timing and
+source `Dtd { block: 0, index: 0 }`: EDID 1.4 and later always have one, EDID 1.3 and earlier
+only with the preferred-timing feature bit set (as edid-decode, libdisplay-info and Linux's
+DRM read it). `preferred_image_size_mm` is that descriptor's image size, under the same
+rule. Known gap until each descriptor's own size is decoded: an EDID 1.3 or earlier without
+the feature bit reports no size, even when its first timing descriptor gives one; the
+field's documentation in display-types says where to read it meanwhile. Extension blocks never fill either. Only the base block's handler sets them; a base
+handler that corrects them is registered after it ([extensibility](extensibility.md)).
+
 ### `StaticDisplayCapabilities<const MAX_MODES: usize>` (static pipeline, all tiers)
 
 The output type for `capabilities_from_edid_static`. Contains all the same scalar fields as
@@ -137,12 +147,13 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     // All scalar fields identical to DisplayCapabilities
     pub manufacturer: Option<ManufacturerId>,
     // ...
+    pub preferred_timing: Option<VideoMode>, // set even when supported_modes is full
 
     // Mode storage
     pub supported_modes: [Option<VideoMode>; MAX_MODES],
     pub num_modes: usize,
 
-    // Warning storage (private; see the accessors below)
+    // Warning storage and the dropped-mode count (private; see the accessors below)
 }
 ```
 
@@ -154,6 +165,7 @@ for mode in caps.iter_modes() { /* &VideoMode */ }
 for warn in caps.iter_warnings() { /* &EdidWarning */ }
 let all: &[EdidWarning] = caps.warnings();
 let lost: u16 = caps.warnings_dropped(); // beyond MAX_STATIC_WARNINGS (8)
+let missed: u16 = caps.modes_dropped(); // beyond MAX_MODES (an upper bound)
 ```
 
 ### `VideoMode` construction
@@ -183,8 +195,8 @@ with `DtdBorderPolicy::Fixed`: the mode's refresh rate and `h_blank` follow that
 `None` means it was not settled; for a DTD with borders, piaf then read EDID 1.3 and emitted
 `DtdBordersAmbiguous`, and a consumer may need to consider the 1.4 reading as well.
 
-Modes beyond capacity are silently dropped. Warnings beyond `MAX_STATIC_WARNINGS` are not
-stored but counted in `warnings_dropped()`. 64 is a reasonable default for `MAX_MODES`.
+Modes beyond capacity are not stored but counted in `modes_dropped()`. Warnings beyond
+`MAX_STATIC_WARNINGS` are not stored but counted in `warnings_dropped()`. 64 is a reasonable default for `MAX_MODES`.
 
 `StaticDisplayCapabilities` does not have an `extension_data` field. Rich extension metadata
 (audio, VSDB, colorimetry, HDR) is only available through the dynamic pipeline.
@@ -244,13 +256,16 @@ the standard.
 
 ## Error and warning model
 
-Errors and warnings are distinct.
+Errors and warnings are distinct. The listing below shows every error and a selection of
+the warnings; the `EdidWarning` API docs list them all.
 
 ```rust
 pub enum EdidError {
     InvalidLength,
     InvalidHeader,
     ChecksumMismatch,
+    /// The version byte is not 1: not EDID 1.x (as libdisplay-info and Linux refuse it).
+    UnsupportedVersion { version: u8 },
 }
 
 pub enum EdidWarning {
@@ -288,6 +303,17 @@ pub enum EdidWarning {
     /// Byte slice length differs from `(1 + extension_count) × 128`.
     /// Extra bytes are ignored; too few is a hard `EdidError::InvalidLength`.
     SizeMismatch { expected: usize, actual: usize },
+    /// A timing descriptor with a pixel clock but a zero active area or blanking.
+    DtdGeometryInvalid { h_active: u16, h_blank: u16, v_active: u16, v_blank: u16 },
+    /// The EDID has a preferred timing, but slot 0 is not a timing.
+    PreferredTimingNotInFirstSlot { timing_slot: Option<u8> },
+    /// EDID 1.3 without the preferred-timing feature bit.
+    PreferredTimingBitClear,
+    /// The preferred timing's image size does not have the shape of its pixels.
+    PreferredImageSizeShapeMismatch {
+        width_mm: u16, height_mm: u16, expected_width_mm: u32, expected_height_mm: u32,
+    },
+    // … and more: see the `EdidWarning` docs.
 }
 ```
 

@@ -21,8 +21,13 @@ pub trait ModeSink {
     /// Push a decoded video mode. Implementations ignore duplicates, but differ in what a
     /// duplicate is: [`DisplayCapabilities`] drops only a mode equal in every field (so two
     /// timings for the same resolution and rate are both kept), `StaticDisplayCapabilities`
-    /// any mode with the same width, height, refresh rate and interlace flag (the first
-    /// wins).
+    /// any mode with the same width, height, refresh rate and interlace flag (the first is
+    /// kept, except that a DTD-sourced mode replaces a matching entry from another source).
+    ///
+    /// `StaticDisplayCapabilities` recognises a DTD by its source (`ModeSource::Dtd`): a DTD
+    /// decoded without a block number has no source and replaces nothing, whereas
+    /// `DisplayCapabilities`' DTD decoder replaces a matching non-DTD entry either way. The
+    /// built-in pipelines always supply block numbers.
     fn push_mode(&mut self, mode: VideoMode);
     /// Push a non-fatal warning encountered while processing a block.
     fn push_warning(&mut self, w: EdidWarning);
@@ -129,7 +134,8 @@ impl ModeSink for DisplayCapabilities {
 /// Contains the same scalar fields as [`DisplayCapabilities`] plus a fixed-capacity mode list.
 /// Use `MAX_MODES` to set the maximum number of video modes that can be stored; 64 is a
 /// reasonable default for most displays (real displays rarely declare more than ~40 modes).
-/// Modes beyond the capacity are silently dropped. Warnings are capped at
+/// Modes beyond the capacity are not stored but counted in
+/// [`modes_dropped`][Self::modes_dropped]. Warnings are capped at
 /// [`MAX_STATIC_WARNINGS`]; those beyond it are counted in
 /// [`warnings_dropped`][Self::warnings_dropped].
 ///
@@ -137,7 +143,9 @@ impl ModeSink for DisplayCapabilities {
 ///
 /// # Stack size
 ///
-/// At `MAX_MODES = 64` this struct is approximately 3 KB. On targets with very limited stack
+/// Each mode slot takes 56 bytes, and the other fields about 480 bytes on a 32-bit target
+/// (560 on a 64-bit one): at `MAX_MODES = 64` this struct is about 4 KB (4,064 bytes on
+/// `thumbv7em-none-eabi`, 4,144 on x86-64). On targets with very limited stack
 /// space, consider placing the value in a `static mut` or a statically-allocated buffer
 /// rather than on the stack.
 #[non_exhaustive]
@@ -263,12 +271,21 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     pub max_h_rate_khz: Option<u16>,
     /// Maximum pixel clock in MHz.
     pub max_pixel_clock_mhz: Option<u16>,
-    /// Physical image area dimensions in millimetres `(width_mm, height_mm)`, decoded from
-    /// the first detailed timing descriptor that provides non-zero values (bytes 12–14).
+    /// Image size of the preferred timing, in millimetres `(width_mm, height_mm)`: the size
+    /// in the descriptor that [`preferred_timing`][Self::preferred_timing] is decoded from.
     ///
     /// More precise than [`screen_size`][Self::screen_size] (which is in cm from the base
-    /// block header). `None` when all DTD image-size fields are zero.
+    /// block header). `None` when the EDID has no preferred timing or that descriptor gives
+    /// no size (either axis 0). As [`DisplayCapabilities::preferred_image_size_mm`], including
+    /// its known gap: an EDID 1.3 or earlier without the preferred-timing feature bit reports
+    /// no size here, even when its first timing descriptor gives one.
     pub preferred_image_size_mm: Option<(u16, u16)>,
+    /// The preferred timing: the base block's first timing descriptor, with its full
+    /// timing. EDID 1.4 and later always have one; EDID 1.3 and earlier only with the
+    /// preferred-timing feature bit set. As [`DisplayCapabilities::preferred_timing`].
+    ///
+    /// Set even when [`supported_modes`][Self::supported_modes] is full.
+    pub preferred_timing: Option<VideoMode>,
     /// Video timing formula reported in the display range limits descriptor (`0xFD`), byte 10.
     pub timing_formula: Option<crate::model::timing::TimingFormula>,
     /// DCM polynomial coefficients decoded from a Color Management Data descriptor (`0xF9`).
@@ -282,6 +299,8 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     pub num_modes: usize,
     // Non-fatal conditions collected from the parser and all handlers.
     warnings: InlineWarnings<MAX_STATIC_WARNINGS>,
+    // Modes that did not fit in `supported_modes` (saturating).
+    modes_dropped: u16,
 }
 
 /// The number of warnings a [`StaticDisplayCapabilities`] stores; further warnings are
@@ -335,6 +354,7 @@ impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
             max_h_rate_khz: None,
             max_pixel_clock_mhz: None,
             preferred_image_size_mm: None,
+            preferred_timing: None,
             timing_formula: None,
             color_management: None,
             // `Option<VideoMode>` is not `Copy` so array repeat syntax is unavailable;
@@ -342,6 +362,7 @@ impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
             supported_modes: core::array::from_fn(|_| None),
             num_modes: 0,
             warnings: InlineWarnings::new(),
+            modes_dropped: 0,
         }
     }
 }
@@ -368,6 +389,17 @@ impl<const MAX_MODES: usize> StaticDisplayCapabilities<MAX_MODES> {
         self.warnings.dropped()
     }
 
+    /// The number of modes that did not fit in the `MAX_MODES` slots of
+    /// [`supported_modes`][Self::supported_modes] (saturating at `u16::MAX`); non-zero
+    /// exactly when a mode was lost.
+    ///
+    /// A mode that repeats a stored one is deduplicated, not counted. One that repeats a
+    /// mode that was itself dropped cannot be recognised (nothing was stored to compare
+    /// with) and is counted again, so this is an upper bound on the distinct modes lost.
+    pub fn modes_dropped(&self) -> u16 {
+        self.modes_dropped
+    }
+
     // Counts warnings dropped upstream (by the parser) in `warnings_dropped`.
     pub(crate) fn add_warnings_dropped(&mut self, n: u16) {
         self.warnings.add_dropped(n);
@@ -376,26 +408,30 @@ impl<const MAX_MODES: usize> StaticDisplayCapabilities<MAX_MODES> {
 
 impl<const MAX_MODES: usize> ModeSink for StaticDisplayCapabilities<MAX_MODES> {
     fn push_mode(&mut self, mode: VideoMode) {
-        if self.num_modes < MAX_MODES {
-            // Dedup by (width, height, refresh_rate, interlaced) — the same criterion used
-            // by the alloc pipeline when processing CEA SVDs.  The first entry for a given
-            // resolution/rate wins, so a DTD-derived mode with full timing detail takes
-            // precedence over a later SVD-derived mode with sparse timing detail.
-            for i in 0..self.num_modes {
-                if let Some(existing) = &self.supported_modes[i] {
-                    if existing.width == mode.width
-                        && existing.height == mode.height
-                        && existing.refresh_rate == mode.refresh_rate
-                        && existing.interlaced == mode.interlaced
-                    {
-                        return;
-                    }
+        // Dedup by (width, height, refresh_rate, interlaced). The first entry for a
+        // resolution/rate is kept, except that a DTD takes over an entry from any other
+        // source (an established, standard or VIC mode), as the alloc pipeline's
+        // `decode_dtd_slot` does: the DTD carries the full timing, and DTDs often come
+        // after those entries (base block, CTA block). An earlier DTD's entry is kept.
+        let is_dtd = |m: &VideoMode| matches!(m.source, Some(ModeSource::Dtd { .. }));
+        for existing in self.supported_modes[..self.num_modes].iter_mut().flatten() {
+            if existing.width == mode.width
+                && existing.height == mode.height
+                && existing.refresh_rate == mode.refresh_rate
+                && existing.interlaced == mode.interlaced
+            {
+                if is_dtd(&mode) && !is_dtd(existing) {
+                    *existing = mode;
                 }
+                return;
             }
+        }
+        if self.num_modes < MAX_MODES {
             self.supported_modes[self.num_modes] = Some(mode);
             self.num_modes += 1;
+        } else {
+            self.modes_dropped = self.modes_dropped.saturating_add(1);
         }
-        // Modes beyond capacity are silently dropped.
     }
 
     fn push_warning(&mut self, w: EdidWarning) {
