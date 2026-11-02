@@ -183,8 +183,8 @@ with `DtdBorderPolicy::Fixed`: the mode's refresh rate and `h_blank` follow that
 `None` means it was not settled; for a DTD with borders, piaf then read EDID 1.3 and emitted
 `DtdBordersAmbiguous`, and a consumer may need to consider the 1.4 reading as well.
 
-Modes beyond capacity are silently dropped. Warnings beyond `MAX_STATIC_WARNINGS` are not
-stored but counted in `warnings_dropped()`. 64 is a reasonable default for `MAX_MODES`.
+Modes beyond capacity are not stored but counted in `modes_dropped()`. Warnings beyond
+`MAX_STATIC_WARNINGS` are not stored but counted in `warnings_dropped()`. 64 is a reasonable default for `MAX_MODES`.
 
 `StaticDisplayCapabilities` does not have an `extension_data` field. Rich extension metadata
 (audio, VSDB, colorimetry, HDR) is only available through the dynamic pipeline.

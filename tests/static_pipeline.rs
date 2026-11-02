@@ -118,6 +118,24 @@ fn test_static_mode_cap_exceeded() {
         "expected exactly MAX_MODES modes, got {}",
         caps.num_modes
     );
+
+    // At least every distinct mode a roomy run keeps beyond 4 is counted. VICs 2/3, 4/5, …
+    // repeat each other: a repeat of a dropped mode cannot be recognised and counts again.
+    let roomy: StaticDisplayCapabilities<64> =
+        capabilities_from_edid_static(&parsed, STANDARD_HANDLERS);
+    assert_eq!(roomy.modes_dropped(), 0);
+    assert!(usize::from(caps.modes_dropped()) >= roomy.num_modes - 4);
+}
+
+#[test]
+fn static_modes_dropped_counts_overflow_not_duplicates() {
+    let mut caps = StaticDisplayCapabilities::<1>::default();
+    caps.push_mode(piaf::VideoMode::new(640, 480, 60u32, false));
+    caps.push_mode(piaf::VideoMode::new(640, 480, 60u32, false)); // duplicate: deduplicated
+    assert_eq!(caps.modes_dropped(), 0);
+    caps.push_mode(piaf::VideoMode::new(800, 600, 60u32, false)); // no room
+    caps.push_mode(piaf::VideoMode::new(1024, 768, 60u32, false));
+    assert_eq!((caps.num_modes, caps.modes_dropped()), (1, 2));
 }
 
 // ---------------------------------------------------------------------------

@@ -129,7 +129,8 @@ impl ModeSink for DisplayCapabilities {
 /// Contains the same scalar fields as [`DisplayCapabilities`] plus a fixed-capacity mode list.
 /// Use `MAX_MODES` to set the maximum number of video modes that can be stored; 64 is a
 /// reasonable default for most displays (real displays rarely declare more than ~40 modes).
-/// Modes beyond the capacity are silently dropped. Warnings are capped at
+/// Modes beyond the capacity are not stored but counted in
+/// [`modes_dropped`][Self::modes_dropped]. Warnings are capped at
 /// [`MAX_STATIC_WARNINGS`]; those beyond it are counted in
 /// [`warnings_dropped`][Self::warnings_dropped].
 ///
@@ -289,6 +290,8 @@ pub struct StaticDisplayCapabilities<const MAX_MODES: usize> {
     pub num_modes: usize,
     // Non-fatal conditions collected from the parser and all handlers.
     warnings: InlineWarnings<MAX_STATIC_WARNINGS>,
+    // Modes that did not fit in `supported_modes` (saturating).
+    modes_dropped: u16,
 }
 
 /// The number of warnings a [`StaticDisplayCapabilities`] stores; further warnings are
@@ -350,6 +353,7 @@ impl<const MAX_MODES: usize> Default for StaticDisplayCapabilities<MAX_MODES> {
             supported_modes: core::array::from_fn(|_| None),
             num_modes: 0,
             warnings: InlineWarnings::new(),
+            modes_dropped: 0,
         }
     }
 }
@@ -374,6 +378,17 @@ impl<const MAX_MODES: usize> StaticDisplayCapabilities<MAX_MODES> {
     /// (saturating at `u16::MAX`).
     pub fn warnings_dropped(&self) -> u16 {
         self.warnings.dropped()
+    }
+
+    /// The number of modes that did not fit in the `MAX_MODES` slots of
+    /// [`supported_modes`][Self::supported_modes] (saturating at `u16::MAX`); non-zero
+    /// exactly when a mode was lost.
+    ///
+    /// A mode that repeats a stored one is deduplicated, not counted. One that repeats a
+    /// mode that was itself dropped cannot be recognised (nothing was stored to compare
+    /// with) and is counted again, so this is an upper bound on the distinct modes lost.
+    pub fn modes_dropped(&self) -> u16 {
+        self.modes_dropped
     }
 
     // Counts warnings dropped upstream (by the parser) in `warnings_dropped`.
@@ -405,8 +420,9 @@ impl<const MAX_MODES: usize> ModeSink for StaticDisplayCapabilities<MAX_MODES> {
         if self.num_modes < MAX_MODES {
             self.supported_modes[self.num_modes] = Some(mode);
             self.num_modes += 1;
+        } else {
+            self.modes_dropped = self.modes_dropped.saturating_add(1);
         }
-        // Modes beyond capacity are silently dropped.
     }
 
     fn push_warning(&mut self, w: EdidWarning) {

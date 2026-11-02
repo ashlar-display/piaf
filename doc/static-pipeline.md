@@ -82,9 +82,12 @@ pub fn iter_modes(&self) -> impl Iterator<Item = &VideoMode>
 pub fn warnings(&self) -> &[EdidWarning]
 pub fn iter_warnings(&self) -> impl Iterator<Item = &EdidWarning>
 pub fn warnings_dropped(&self) -> u16
+pub fn modes_dropped(&self) -> u16
 ```
 
-Modes beyond capacity are silently dropped. 64 is a reasonable default for `MAX_MODES`;
+Modes beyond capacity are not stored but counted in `modes_dropped()` (saturating at
+`u16::MAX`; a repeat of a stored mode is not counted, a repeat of a dropped one is, so it
+is an upper bound on the distinct modes lost). 64 is a reasonable default for `MAX_MODES`;
 real displays rarely declare more than ~40 modes. Up to `MAX_STATIC_WARNINGS` (8) warnings
 are stored; `warnings_dropped()` counts the ones that did not fit (saturating at
 `u16::MAX`). The warning API is the same in every build.

@@ -152,7 +152,8 @@ pub fn capabilities_from_edid_with_options<T: EdidSource>(
 /// Derives [`StaticDisplayCapabilities`] from any [`EdidSource`] without heap allocation.
 ///
 /// `N` is the maximum number of video modes the result can hold; 64 is a reasonable default
-/// for most displays. Modes beyond `N` are silently dropped; warnings beyond
+/// for most displays. Modes beyond `N` are counted in
+/// [`modes_dropped`][StaticDisplayCapabilities::modes_dropped]; warnings beyond
 /// [`MAX_STATIC_WARNINGS`][crate::MAX_STATIC_WARNINGS] are counted in
 /// [`warnings_dropped`][StaticDisplayCapabilities::warnings_dropped].
 ///

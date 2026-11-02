@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`StaticDisplayCapabilities::modes_dropped()`** counts the modes that did not fit in
+  `MAX_MODES` (saturating at `u16::MAX`), like `warnings_dropped()`; they were dropped
+  without a count. A repeat of a stored mode is deduplicated, not counted; a repeat of a
+  dropped mode cannot be recognised and is counted again, so the count is an upper bound on
+  the distinct modes lost, and non-zero exactly when one was.
 - **`EdidWarning::PreferredImageSizeShapeMismatch`** when the preferred timing's image
   size does not have the shape of its pixels: one side kept, the other derived from the
   active pixels (frame lines when interlaced), more than 10 mm off; not checked below
