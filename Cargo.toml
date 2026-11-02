@@ -25,7 +25,3 @@ thiserror = { version = "2.0", default-features = false }
 
 [dev-dependencies]
 serde_json = { version = "1.0", optional = false }
-
-# Until display-types 0.5.1 is released (`DisplayCapabilities::preferred_timing`); remove before release.
-[patch.crates-io]
-display-types = { path = "../display-types" }
