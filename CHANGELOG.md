@@ -42,7 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   again, so a driver bounds its retries; `warnings()` reports extension blocks with a bad
   checksum, an HF-EEODB below byte 126, and the EDID's blocks beyond the caller's capacity
   (`ReadWarning`). It keeps no copy of the blocks and needs no `alloc`; whether to read a
-  block again is the caller's, with `parser::block_checksum_valid`.
+  block again is the caller's, with `parser::block_checksum_valid`. `BlockAddress::new`
+  builds an address for a driver's tests.
 - **`ExtensionCount`**: the rule for how many extension blocks an EDID has, from its base
   block and block 1: `declared()` (byte 126), `hf_eeodb()` and `extensions()`, the EDID's
   count; `to_read(ReadCount)`, the blocks a read takes. `parse_edid` and the read plan use

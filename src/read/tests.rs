@@ -70,7 +70,7 @@ fn warnings(plan: &EdidReadPlan) -> ([ReadWarning; 4], usize) {
 
 #[test]
 fn addresses_are_two_blocks_per_segment() {
-    let at = |block| BlockAddress { block };
+    let at = BlockAddress::new;
     assert_eq!((at(0).segment(), at(0).offset()), (0, 0));
     assert_eq!((at(1).segment(), at(1).offset()), (0, 128));
     assert_eq!((at(2).segment(), at(2).offset()), (1, 0));
@@ -228,7 +228,10 @@ fn the_read_stops_at_the_callers_capacity() {
     let (found, n) = warnings(&plan);
     assert_eq!(
         found[..n],
-        [ReadWarning::BlocksNotRead { wanted: 4, read: 2 }]
+        [ReadWarning::BlocksNotRead {
+            edid_blocks: 4,
+            read: 2
+        }]
     );
 
     // Room for the base block only: byte 126's count is all the read knows.
@@ -237,13 +240,59 @@ fn the_read_stops_at_the_callers_capacity() {
     let (found, n) = warnings(&plan);
     assert_eq!(
         found[..n],
-        [ReadWarning::BlocksNotRead { wanted: 2, read: 1 }]
+        [ReadWarning::BlocksNotRead {
+            edid_blocks: 2,
+            read: 1
+        }]
     );
     assert_eq!(plan.extension_count(), None);
+}
 
-    // A capacity above 256 is 256.
-    let mut plan = EdidReadPlan::new(ReadOptions::new().with_capacity(1000));
-    assert_eq!(run(&mut plan, &sink, &mut [[0u8; 128]; 4]), 4);
+#[test]
+fn an_hf_eeodb_can_raise_the_read_past_the_capacity() {
+    let sink = Sink {
+        blocks: &[
+            base(1),
+            cta_with_hf_eeodb(5),
+            extension(2),
+            extension(3),
+            extension(4),
+            extension(5),
+        ],
+    };
+    let mut plan = EdidReadPlan::new(ReadOptions::new().with_capacity(3));
+    let mut buffer = [[0u8; 128]; 3];
+    assert_eq!(run(&mut plan, &sink, &mut buffer), 3);
+    let (found, n) = warnings(&plan);
+    assert_eq!(
+        found[..n],
+        [ReadWarning::BlocksNotRead {
+            edid_blocks: 6,
+            read: 3
+        }]
+    );
+    // Byte 126's blocks are all there: `parse_edid` takes it, and says what is missing.
+    let parsed = parse_edid(buffer.as_flattened(), &ExtensionTagRegistry::new()).unwrap();
+    assert_eq!(parsed.num_extensions, 2);
+}
+
+#[test]
+fn blocks_beyond_the_edid_are_not_counted_as_missing() {
+    // The HF-EEODB ends the EDID at block 1; `Larger` would read byte 126's three.
+    let sink = Sink {
+        blocks: &[base(3), cta_with_hf_eeodb(1), extension(2), extension(3)],
+    };
+    let mut plan = EdidReadPlan::new(ReadOptions::new().with_capacity(2));
+    let mut buffer = [[0u8; 128]; 2];
+    assert_eq!(run(&mut plan, &sink, &mut buffer), 2);
+    let (found, n) = warnings(&plan);
+    assert_eq!(
+        found[..n],
+        [ReadWarning::HfEeodbBelowDeclared {
+            declared: 3,
+            hf_eeodb: 1
+        }]
+    );
 }
 
 /// Every rule, with the HF-EEODB above, below and without byte 126: what the plan reads,
@@ -271,6 +320,7 @@ fn parse_edid_takes_every_read() {
 fn an_edid_without_extensions_is_one_block() {
     let mut plan = EdidReadPlan::new(ReadOptions::default());
     assert_eq!(plan.extension_count(), None);
+    assert_eq!(plan.warnings().count(), 0);
     plan.push(&base(0)).unwrap();
     assert_eq!(plan.next(), None);
     let count = plan.extension_count().unwrap();

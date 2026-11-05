@@ -11,7 +11,15 @@
 //! Whether to read a block again is the driver's choice: a base block that fails its checks
 //! is an error and the plan waits for it, an extension block with a bad checksum is kept
 //! and reported ([`ReadWarning::ChecksumMismatch`]). Check one before handing it over with
-//! [`block_checksum_valid`].
+//! [`block_checksum_valid`]. The plan never gives up on the base block, so a driver bounds
+//! its own retries: a sink with a corrupt or blank EDID returns a bad base block every time.
+//!
+//! How a segment is selected on the bus (the E-DDC segment pointer) is the bus's, for
+//! example `hdmi-hal`'s `DdcBus::read_segmented`; the plan only names the segment and offset.
+//!
+//! The blocks read go to [`parse_edid`](crate::parse_edid) as they are. Both report a smaller
+//! HF-EEODB count (`HfEeodbBelowDeclared`), the plan because it explains the blocks
+//! [`ReadCount::Larger`] read beyond the EDID.
 //!
 //! ```
 //! use piaf::read::{EdidReadPlan, ReadOptions};
@@ -78,8 +86,12 @@ pub struct ReadOptions {
     /// How many extension blocks to read when byte 126 and the HF-EEODB differ.
     pub read_count: ReadCount,
     /// The most blocks the caller holds, the base block included: the plan asks for no
-    /// more, and reports the rest ([`ReadWarning::BlocksNotRead`]). 256, every block an
-    /// EDID can have, by default; read as at least 1.
+    /// more, and reports the EDID's blocks it did not read
+    /// ([`ReadWarning::BlocksNotRead`]). 256, every block an EDID can have, by default; read
+    /// as at least 1, and a larger value changes nothing.
+    ///
+    /// A read cut short before byte 126's blocks is not a complete EDID:
+    /// [`parse_edid`](crate::parse_edid) refuses it.
     pub capacity: u16,
 }
 
@@ -120,6 +132,11 @@ pub struct BlockAddress {
 }
 
 impl BlockAddress {
+    /// The address of block `block`: 0 for the base block, `n` for extension `n`.
+    pub const fn new(block: u8) -> Self {
+        BlockAddress { block }
+    }
+
     /// The block's number: 0 for the base block, `n` for extension `n`.
     pub const fn block(self) -> u8 {
         self.block
@@ -305,6 +322,17 @@ impl EdidReadPlan {
         } else {
             self.options.capacity
         }
+    }
+
+    /// The EDID's blocks, base block included, as far as the blocks taken tell: byte 126's
+    /// count until block 1 is taken, the EDID's count after it.
+    fn edid_blocks(&self) -> u16 {
+        let extensions = match (self.read, self.extension_count()) {
+            (0, _) => 0,
+            (_, Some(count)) => count.extensions(),
+            (_, None) => self.declared,
+        };
+        1 + u16::from(extensions)
     }
 
     /// The blocks the read wants, base block included, as far as the blocks taken tell:

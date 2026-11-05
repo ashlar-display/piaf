@@ -9,11 +9,10 @@ use crate::model::warnings::ParseWarnings;
 /// The fixed 8-byte magic header at offset 0 of every valid EDID block.
 pub const EDID_HEADER: [u8; 8] = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00];
 
-/// Maximum number of extension blocks the parser processes: 255, the most byte 126 or an
-/// HF-EEODB can declare.
+/// The most extension blocks an EDID can declare, by byte 126 or an HF-EEODB: 255.
 ///
-/// [`parse_edid`] borrows its input and copies no block, so every build takes the full
-/// count; it was 64 before piaf 0.7.
+/// [`parse_edid`] parses every one: it borrows its input and copies no block, so no build
+/// needs a smaller cap. Before piaf 0.7 it was a cap of 64.
 pub const MAX_EXTENSION_BLOCKS: usize = 255;
 
 /// The CTA-861 extension tag.
@@ -69,7 +68,9 @@ pub(crate) fn check_base_block(base: &[u8; 128]) -> Result<(), EdidError> {
 /// How many extension blocks an EDID has: byte 126 of its base block, and the HF-EEODB
 /// count when block 1 carries one.
 ///
-/// One rule for every reader of an EDID: [`parse_edid`] sizes the EDID with it.
+/// One rule for every reader of an EDID: [`parse_edid`] sizes the EDID with it, and
+/// [`to_read`](Self::to_read) tells a reader how many blocks to read
+/// ([`EdidReadPlan`](crate::read::EdidReadPlan) uses it).
 /// [`extensions`](Self::extensions) is the EDID's extension count: the HF-EEODB count when
 /// present, as Linux and Amlogic take it, even when it is smaller than byte 126.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
