@@ -36,9 +36,13 @@ fn edid_warning_simple_variants() {
 
 #[test]
 fn edid_warning_struct_variants() {
-    assert_round_trips(EdidWarning::ExtensionBlockLimitReached {
-        declared: 10,
-        limit: 6,
+    assert_round_trips(EdidWarning::HfEeodbBelowDeclared {
+        declared: 3,
+        hf_eeodb: 1,
+    });
+    assert_round_trips(EdidWarning::HfEeodbBlocksMissing {
+        hf_eeodb: 3,
+        present: 1,
     });
     assert_round_trips(EdidWarning::DisplayIdExtensionCountMismatch {
         declared: 2,

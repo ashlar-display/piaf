@@ -561,27 +561,6 @@ pub(super) fn parse_t10vtdb(block_data: &[u8]) -> Option<T10VtdbBlock> {
 }
 
 // ---------------------------------------------------------------------------
-// HDMI Forum EDID Extension Override Data Block (extended tag 0x78)
-// ---------------------------------------------------------------------------
-
-/// Parse the HF-EEODB payload (`block_data` starts after the extended tag byte).
-///
-/// Returns the EDID extension block count override, or `None` if the payload
-/// is empty or the count is zero (meaningless).
-///
-/// The HF-EEODB is defined by HDMI 2.1. It must be the first
-/// data block of Block 1 and overrides the extension count in the base EDID
-/// header for HDMI 2.1 sinks whose full E-EDID exceeds what the 1-byte base
-/// count can represent.
-pub(super) fn parse_hf_eeodb(block_data: &[u8]) -> Option<u8> {
-    let count = *block_data.first()?;
-    if count == 0 {
-        return None;
-    }
-    Some(count)
-}
-
-// ---------------------------------------------------------------------------
 // HDMI Forum Sink Capability Data Block (extended tag 0x79)
 // ---------------------------------------------------------------------------
 
@@ -1883,25 +1862,6 @@ mod tests {
         data.push(0xFF); // orphan byte
         let t10 = parse_t10vtdb(&data).unwrap();
         assert_eq!(t10.entries.len(), 1); // only the complete descriptor
-    }
-
-    // HF-EEODB tests
-
-    #[test]
-    fn test_hf_eeodb_valid() {
-        assert_eq!(parse_hf_eeodb(&[5]), Some(5));
-        assert_eq!(parse_hf_eeodb(&[255]), Some(255));
-        assert_eq!(parse_hf_eeodb(&[1]), Some(1));
-    }
-
-    #[test]
-    fn test_hf_eeodb_zero_returns_none() {
-        assert!(parse_hf_eeodb(&[0]).is_none());
-    }
-
-    #[test]
-    fn test_hf_eeodb_empty_returns_none() {
-        assert!(parse_hf_eeodb(&[]).is_none());
     }
 
     // HF-SCDB tests

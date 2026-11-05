@@ -54,12 +54,11 @@ use extended_blocks::{
     EXT_TAG_ROOM_CONFIGURATION, EXT_TAG_SPEAKER_LOCATION, EXT_TAG_T7VTDB, EXT_TAG_T8VTDB,
     EXT_TAG_T10VTDB, EXT_TAG_VESA_DDDB, EXT_TAG_VIDEO_CAPABILITY, EXT_TAG_VIDEO_FORMAT_PREFERENCE,
     EXT_TAG_VSADB, EXT_TAG_VSVDB, EXT_TAG_VTB_EXT, EXT_TAG_Y420_CAPABILITY_MAP, EXT_TAG_Y420_VIDEO,
-    parse_colorimetry, parse_hdr_dynamic_metadata, parse_hdr_static_metadata, parse_hf_eeodb,
-    parse_hf_scdb, parse_hf_vsdb, parse_infoframe_db, parse_room_configuration,
-    parse_speaker_allocation, parse_speaker_location, parse_t7vtdb, parse_t8vtdb, parse_t10vtdb,
-    parse_vendor_specific_block, parse_vesa_display_device, parse_vesa_transfer_characteristic,
-    parse_video_capability, parse_video_format_preferences, parse_vtb_ext,
-    parse_y420_capability_map, parse_y420_vdb,
+    parse_colorimetry, parse_hdr_dynamic_metadata, parse_hdr_static_metadata, parse_hf_scdb,
+    parse_hf_vsdb, parse_infoframe_db, parse_room_configuration, parse_speaker_allocation,
+    parse_speaker_location, parse_t7vtdb, parse_t8vtdb, parse_t10vtdb, parse_vendor_specific_block,
+    parse_vesa_display_device, parse_vesa_transfer_characteristic, parse_video_capability,
+    parse_video_format_preferences, parse_vtb_ext, parse_y420_capability_map, parse_y420_vdb,
 };
 #[cfg(any(feature = "alloc", feature = "std"))]
 use hdmi_vsdb::parse_hdmi_vsdb;
@@ -99,6 +98,10 @@ impl ExtensionHandler for Cea861Handler {
 
         for (i, ext) in blocks.iter().enumerate() {
             let block = ctx.block_number(i);
+            // The one place an HF-EEODB counts (the rule `parse_edid` sizes the EDID by).
+            if block == Some(1) {
+                cea_caps.hf_eeodb_extension_count = crate::parser::hf_eeodb_extension_count(ext);
+            }
             // Parse the data block collection: bytes 4 through dtd_offset-1.
             // When dtd_offset == 0 CTA-861 says no DTDs are present, so data blocks
             // may fill the rest of the block (bytes 4–127).
@@ -368,9 +371,8 @@ fn handle_extended_tag_block(
                 cea_caps.t10_vtdb.push(t10);
             }
         }
-        Some(EXT_TAG_HF_EEODB) if cea_caps.hf_eeodb_extension_count.is_none() => {
-            cea_caps.hf_eeodb_extension_count = parse_hf_eeodb(&block_data[1..]);
-        }
+        // Counts only at bytes 4–6 of block 1; `process_in_context` reads it there.
+        Some(EXT_TAG_HF_EEODB) => {}
         Some(EXT_TAG_HF_SCDB) if cea_caps.hf_scdb.is_none() => {
             cea_caps.hf_scdb = parse_hf_scdb(&block_data[1..]);
         }

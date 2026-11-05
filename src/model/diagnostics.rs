@@ -174,20 +174,6 @@ pub enum EdidWarning {
         /// The audio format code (byte 0, bits 3:0).
         code: u8,
     },
-    /// The number of extension blocks declared in the base block exceeds the parser's
-    /// safety limit. Only the first `limit` blocks were parsed; the rest were ignored.
-    ///
-    /// Real displays have at most a handful of extension blocks. A very large
-    /// `extension_count` most likely indicates a malformed or hostile EDID.
-    #[error(
-        "extension block count {declared} exceeds limit {limit}; only {limit} blocks were parsed"
-    )]
-    ExtensionBlockLimitReached {
-        /// The value of `extension_count` as declared in the base block.
-        declared: usize,
-        /// The maximum number of extension blocks the parser will process.
-        limit: usize,
-    },
     /// A DisplayID extension block carries an unrecognised version byte.
     ///
     /// The inner value is the version byte found at offset 1 of the extension block.
@@ -242,17 +228,48 @@ pub enum EdidWarning {
         /// Revision byte (second byte of the 3-byte data block header) as found.
         revision: u8,
     },
-    /// The byte slice length does not match the size implied by the extension count.
+    /// The byte slice is longer than the EDID's block counts account for.
     ///
-    /// The EDID header declares `extension_count` extension blocks, so the expected
-    /// size is `(1 + extension_count) × 128` bytes. Extra bytes are ignored but may
-    /// indicate a driver bug, a KVM device, or a hotplug race.
+    /// The counts are byte 126 of the base block and, when block 1 carries one, the
+    /// HF-EEODB count ([`ExtensionCount`](crate::parser::ExtensionCount)); the expected size
+    /// is `(1 + the larger of the two) × 128` bytes. Extra bytes are ignored but may indicate
+    /// a driver bug, a KVM device, or a hotplug race.
     #[error("EDID byte length {actual} does not match expected {expected}")]
     SizeMismatch {
-        /// The size implied by the extension count: `(1 + extension_count) × 128`.
+        /// The size the block counts account for: `(1 + count) × 128`, with the larger
+        /// count.
         expected: usize,
         /// The actual length of the byte slice passed to [`crate::parse_edid`].
         actual: usize,
+    },
+    /// Block 1's HF-EEODB declares fewer extension blocks than byte 126 of the base block.
+    ///
+    /// The EDID is the HF-EEODB's count, as Linux and Amlogic take it: the blocks after it
+    /// are not parsed.
+    #[error(
+        "HF-EEODB declares {hf_eeodb} extension block(s), fewer than the {declared} of byte 126; \
+         the blocks after the HF-EEODB count were not parsed"
+    )]
+    HfEeodbBelowDeclared {
+        /// Byte 126 of the base block.
+        declared: u8,
+        /// The extension count the HF-EEODB declares.
+        hf_eeodb: u8,
+    },
+    /// Block 1's HF-EEODB declares more extension blocks than the input holds.
+    ///
+    /// The input holds every block byte 126 declares, as a reader that does not know
+    /// HF-EEODB returns the EDID, so it is parsed as far as it goes: `present` extension
+    /// blocks.
+    #[error(
+        "HF-EEODB declares {hf_eeodb} extension block(s), the input holds {present}; \
+         parsed those"
+    )]
+    HfEeodbBlocksMissing {
+        /// The extension count the HF-EEODB declares.
+        hf_eeodb: u8,
+        /// The extension blocks the input holds, all parsed.
+        present: u8,
     },
 }
 

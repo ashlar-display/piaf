@@ -367,6 +367,51 @@ mod tests {
         (modes, ambiguous)
     }
 
+    /// An EDID with byte 126 = `declared` and the two CTA-861 revision 3 extensions
+    /// `blocks`, each with an HF-EEODB as its first data block when its entry is
+    /// `Some(count)`.
+    fn edid_with_cta_blocks(declared: u8, blocks: [Option<u8>; 2]) -> [u8; 128 * 3] {
+        let mut bytes = [0u8; 128 * 3];
+        bytes[0..8].copy_from_slice(&crate::parser::EDID_HEADER);
+        bytes[0x12] = 1;
+        bytes[126] = declared;
+        for (i, block) in bytes.chunks_exact_mut(128).enumerate() {
+            if let Some(hf_eeodb) = i.checked_sub(1).map(|n| blocks[n]) {
+                block[0] = 0x02;
+                block[1] = 3;
+                block[2] = 4; // no data blocks
+                if let Some(count) = hf_eeodb {
+                    block[2] = 7;
+                    block[4] = (7 << 5) | 2;
+                    block[5] = 0x78;
+                    block[6] = count;
+                }
+            }
+            let sum = block[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            block[127] = 0u8.wrapping_sub(sum);
+        }
+        bytes
+    }
+
+    fn hf_eeodb_of(bytes: &[u8]) -> Option<u8> {
+        let library = ExtensionLibrary::with_standard_handlers();
+        let parsed = parse_edid(bytes, &library).unwrap();
+        let caps = capabilities_from_edid(&parsed, &library);
+        caps.get_extension_data::<crate::capabilities::Cea861Capabilities>(0x02)
+            .unwrap()
+            .hf_eeodb_extension_count
+    }
+
+    #[test]
+    fn test_capabilities_take_hf_eeodb_from_block_1_only() {
+        assert_eq!(
+            hf_eeodb_of(&edid_with_cta_blocks(1, [Some(2), None])),
+            Some(2)
+        );
+        // An HF-EEODB in block 2 declares nothing, as for `parse_edid`.
+        assert_eq!(hf_eeodb_of(&edid_with_cta_blocks(2, [None, Some(2)])), None);
+    }
+
     #[test]
     fn test_default_options_leave_border_reading_unsettled() {
         let bytes = super::static_tests::edid_with_bordered_dtds();

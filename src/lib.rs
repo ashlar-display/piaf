@@ -68,9 +68,9 @@ pub use model::{ExtensionHandler, HandlerContext};
 pub mod parser;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use model::ParsedEdid;
-pub use parser::parse_edid;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use parser::parse_edid_owned;
+pub use parser::{ExtensionCount, hf_eeodb_extension_count, parse_edid};
 
 /// Capability extraction from a parsed EDID ([`EdidSource`]).
 pub mod capabilities;
