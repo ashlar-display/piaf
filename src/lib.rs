@@ -5,6 +5,10 @@
 //! 1. [`parse_edid`] — validate and decode raw bytes into [`ParsedEdidRef`] (zero-copy).
 //! 2. [`capabilities_from_edid`] — run extension handlers to produce [`DisplayCapabilities`].
 //!
+//! The bytes are the caller's to obtain: piaf does no I/O. To read them from a sink over DDC,
+//! [`read::EdidReadPlan`] says which block to read next and at which E-DDC segment and
+//! offset, sized by the rule [`parse_edid`] uses ([`ExtensionCount`]).
+//!
 //! # Decoding philosophy
 //!
 //! PIAF decodes everything a standard defines. No field is omitted because it appears
@@ -68,9 +72,11 @@ pub use model::{ExtensionHandler, HandlerContext};
 pub mod parser;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use model::ParsedEdid;
-pub use parser::parse_edid;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use parser::parse_edid_owned;
+pub use parser::{ExtensionCount, hf_eeodb_extension_count, parse_edid};
+
+pub mod read;
 
 /// Capability extraction from a parsed EDID ([`EdidSource`]).
 pub mod capabilities;

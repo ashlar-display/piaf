@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-05
+
+### Breaking changes
+
+- **An HF-EEODB sizes the EDID.** `parse_edid` takes the extension count from block 1's
+  HDMI Forum EDID Extension Override Data Block when there is one, as Linux and Amlogic
+  do, and byte 126 otherwise. An EDID that uses it (byte 126 = 1, the HF-EEODB giving the
+  real count) had its further blocks reported as `SizeMismatch` and left unparsed; they are
+  now parsed, so the output for such EDIDs changes. Input that holds only byte 126's blocks
+  still parses, with `HfEeodbBlocksMissing`; an HF-EEODB smaller than byte 126 ends the
+  EDID there, with `HfEeodbBelowDeclared`, and input that ends there parses too (it had to
+  hold byte 126's blocks). An HF-EEODB in a block 1 with a bad checksum is not trusted.
+  `SizeMismatch` reports bytes beyond the larger of the two counts, and a partial block at
+  the end.
+- **`Cea861Capabilities::hf_eeodb_extension_count` comes from block 1 only.** It took the
+  first HF-EEODB in any CTA-861 block, DisplayID's `0x81` included; it now takes the one at
+  bytes 4–6 of block 1, the only place an HF-EEODB counts, and reports one elsewhere with
+  the new `EdidWarning::HfEeodbMisplaced`. It needs the EDID block numbers the capability
+  pipelines pass: `Cea861Handler::process` called directly, without them, leaves it `None`
+  and does not check placement.
+- **`MAX_EXTENSION_BLOCKS` is 255** (was 64): `parse_edid` copies no block, so every build
+  parses every extension block an EDID can declare. **`EdidWarning::ExtensionBlockLimitReached`
+  is removed**, since no EDID can exceed the limit; warnings serialized with it no longer
+  deserialize.
+
+### Added
+
+- **An I/O-free read plan, `read::EdidReadPlan`**, for reading an EDID from a sink without
+  piaf doing I/O: `next()` names the block to read and its E-DDC segment and offset,
+  `push(block)` takes it, until `next()` is `None`. It sizes the read with `ExtensionCount`;
+  `ReadOptions` chooses how many blocks to read when byte 126 and the HF-EEODB differ
+  (`ReadCount::Larger`, as Linux, the default; `ReadCount::Edid`, as Amlogic) and the most
+  blocks the caller holds. Whatever the options, `parse_edid` takes a complete read. A base
+  block that fails `parse_edid`'s checks is refused (`ReadError::BaseBlock`) and asked for
+  again, so a driver bounds its retries; `warnings()` reports extension blocks with a bad
+  checksum, an HF-EEODB below byte 126, and the EDID's blocks beyond the caller's capacity
+  (`ReadWarning`). It keeps no copy of the blocks and needs no `alloc`; whether to read a
+  block again is the caller's, with `parser::block_checksum_valid`. `BlockAddress::new`
+  builds an address for a driver's tests.
+- **`ExtensionCount`**: the rule for how many extension blocks an EDID has, from its base
+  block and block 1: `declared()` (byte 126), `hf_eeodb()` and `extensions()`, the EDID's
+  count; `to_read(ReadCount)`, the blocks a read takes. `parse_edid` and the read plan use
+  it.
+- **`hf_eeodb_extension_count`**: the count an HF-EEODB declares, read from block 1 under
+  Linux's checks (a CTA-861 block of revision 3 or later, the HF-EEODB at bytes 4–6).
+  `ExtensionCount::new` also requires block 1's checksum, as Linux does.
+- **`EdidWarning::HfEeodbBlocksMissing { hf_eeodb, present }`**,
+  **`EdidWarning::HfEeodbBelowDeclared { declared, hf_eeodb }`** and
+  **`EdidWarning::HfEeodbMisplaced { block }`**.
+
 ## [0.6.0] - 2026-11-02
 
 ### Breaking changes

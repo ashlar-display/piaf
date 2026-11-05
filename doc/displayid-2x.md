@@ -174,11 +174,13 @@ first**. The behaviour:
 - All CTA-specific state — audio descriptors, vendor-specific blocks, HDR static and
   dynamic metadata, colorimetry, video capability, infoframe descriptors, room
   configuration, speaker locations, T7/T8/T10VTDB entries, Y420 VDB / capability map,
-  HDMI Forum SCDB / EEODB, HDMI audio block — appends to the same
-  `Cea861Capabilities` instance.
+  HDMI Forum SCDB, HDMI audio block — appends to the same `Cea861Capabilities` instance.
+  An HF-EEODB is the exception: it counts only as the first data block of the EDID's block 1,
+  so one in a `0x81` block declares nothing and is reported as
+  `EdidWarning::HfEeodbMisplaced { block: None }`.
 - "First-only" extended-tag fields (`video_capability`, `colorimetry`,
   `hdr_static_metadata`, `video_format_preferences`, `y420_capability_map`,
-  `room_configuration`, `hf_eeodb_extension_count`, `hf_scdb`, `hdmi_audio`,
+  `room_configuration`, `hf_scdb`, `hdmi_audio`,
   `speaker_allocation`, `vesa_transfer_characteristic`, `vesa_display_device`,
   `hdmi_vsdb`, `hf_vsdb`) follow the existing intra-CEA "first wins" rule: whichever
   source populates the field first owns it.
