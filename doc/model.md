@@ -307,6 +307,9 @@ pub enum EdidWarning {
     /// Block 1's HF-EEODB declares more blocks than the input holds (it holds byte 126's);
     /// the blocks present are parsed.
     HfEeodbBlocksMissing { hf_eeodb: u8, present: u8 },
+    /// An HF-EEODB outside the first data block of block 1 (`None`: in a DisplayID CTA
+    /// block); it declares nothing.
+    HfEeodbMisplaced { block: Option<u8> },
     /// A timing descriptor with a pixel clock but a zero active area or blanking.
     DtdGeometryInvalid { h_active: u16, h_blank: u16, v_active: u16, v_blank: u16 },
     /// The EDID has a preferred timing, but slot 0 is not a timing.

@@ -412,6 +412,40 @@ mod tests {
         assert_eq!(hf_eeodb_of(&edid_with_cta_blocks(2, [None, Some(2)])), None);
     }
 
+    /// The `HfEeodbMisplaced` warnings capability parsing reports for `bytes`.
+    fn misplaced(bytes: &[u8]) -> Vec<Option<u8>> {
+        use crate::model::diagnostics::EdidWarning;
+        let library = ExtensionLibrary::with_standard_handlers();
+        let parsed = parse_edid(bytes, &library).unwrap();
+        let caps = capabilities_from_edid(&parsed, &library);
+        caps.iter_warnings()
+            .filter_map(|w| match (**w).downcast_ref::<EdidWarning>() {
+                Some(EdidWarning::HfEeodbMisplaced { block }) => Some(*block),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_a_misplaced_hf_eeodb_is_reported() {
+        // In its place: nothing to report.
+        assert_eq!(misplaced(&edid_with_cta_blocks(1, [Some(2), None])), []);
+        // In block 2.
+        assert_eq!(
+            misplaced(&edid_with_cta_blocks(2, [None, Some(2)])),
+            [Some(2)]
+        );
+        // In block 1, after another data block.
+        let mut bytes = edid_with_cta_blocks(1, [None, None]);
+        let block1 = &mut bytes[128..256];
+        block1[2] = 9;
+        block1[4..9].copy_from_slice(&[(2 << 5) | 1, 0x10, (7 << 5) | 2, 0x78, 2]);
+        let sum = block1[..127].iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        block1[127] = 0u8.wrapping_sub(sum);
+        assert_eq!(misplaced(&bytes), [Some(1)]);
+        assert_eq!(hf_eeodb_of(&bytes), None);
+    }
+
     #[test]
     fn test_default_options_leave_border_reading_unsettled() {
         let bytes = super::static_tests::edid_with_bordered_dtds();

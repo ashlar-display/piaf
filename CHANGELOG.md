@@ -20,8 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SizeMismatch` reports bytes beyond the larger of the two counts, and a partial block at
   the end.
 - **`Cea861Capabilities::hf_eeodb_extension_count` comes from block 1 only.** It took the
-  first HF-EEODB in any CTA-861 block; it now takes the one at bytes 4–6 of block 1, the
-  only place an HF-EEODB counts, and `None` for one elsewhere.
+  first HF-EEODB in any CTA-861 block, DisplayID's `0x81` included; it now takes the one at
+  bytes 4–6 of block 1, the only place an HF-EEODB counts, and reports one elsewhere with
+  the new `EdidWarning::HfEeodbMisplaced`. It needs the EDID block numbers the capability
+  pipelines pass: `Cea861Handler::process` called directly, without them, leaves it `None`
+  and does not check placement.
 - **`MAX_EXTENSION_BLOCKS` is 255** (was 64): `parse_edid` copies no block, so every build
   parses every extension block an EDID can declare. **`EdidWarning::ExtensionBlockLimitReached`
   is removed**, since no EDID can exceed the limit; warnings serialized with it no longer
@@ -47,8 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`hf_eeodb_extension_count`**: the count an HF-EEODB declares, read from block 1 under
   Linux's checks (a CTA-861 block of revision 3 or later, the HF-EEODB at bytes 4–6).
   `ExtensionCount::new` also requires block 1's checksum, as Linux does.
-- **`EdidWarning::HfEeodbBlocksMissing { hf_eeodb, present }`** and
-  **`EdidWarning::HfEeodbBelowDeclared { declared, hf_eeodb }`**.
+- **`EdidWarning::HfEeodbBlocksMissing { hf_eeodb, present }`**,
+  **`EdidWarning::HfEeodbBelowDeclared { declared, hf_eeodb }`** and
+  **`EdidWarning::HfEeodbMisplaced { block }`**.
 
 ## [0.6.0] - 2026-11-02
 

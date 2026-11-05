@@ -44,6 +44,8 @@ fn edid_warning_struct_variants() {
         hf_eeodb: 3,
         present: 1,
     });
+    assert_round_trips(EdidWarning::HfEeodbMisplaced { block: Some(2) });
+    assert_round_trips(EdidWarning::HfEeodbMisplaced { block: None });
     assert_round_trips(EdidWarning::DisplayIdExtensionCountMismatch {
         declared: 2,
         found: 1,

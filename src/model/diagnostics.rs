@@ -257,6 +257,19 @@ pub enum EdidWarning {
         /// The extension count the HF-EEODB declares.
         hf_eeodb: u8,
     },
+    /// An HF-EEODB outside the one place it counts, the first data block of block 1; it
+    /// declares nothing.
+    ///
+    /// Reported by capability parsing for a CTA-861 extension block other than block 1, a
+    /// later data block of block 1, or a DisplayID CTA block (`0x81`).
+    #[error(
+        "HF-EEODB in {}, not the first data block of block 1; it declares nothing",
+        HfEeodbPlace(*.block)
+    )]
+    HfEeodbMisplaced {
+        /// The EDID block it was found in; `None` inside a DisplayID CTA block.
+        block: Option<u8>,
+    },
     /// Block 1's HF-EEODB declares more extension blocks than the input holds.
     ///
     /// The input holds every block byte 126 declares, as a reader that does not know
@@ -272,6 +285,18 @@ pub enum EdidWarning {
         /// The extension blocks the input holds, all parsed.
         present: u8,
     },
+}
+
+/// Where a misplaced HF-EEODB was found, for [`EdidWarning::HfEeodbMisplaced`]'s message.
+struct HfEeodbPlace(Option<u8>);
+
+impl core::fmt::Display for HfEeodbPlace {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0 {
+            Some(block) => write!(f, "block {block}"),
+            None => f.write_str("a DisplayID CTA block"),
+        }
+    }
 }
 
 /// A fatal error that prevents useful parsing of an EDID byte stream.

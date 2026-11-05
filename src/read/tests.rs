@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::diagnostics::EdidWarning;
 use crate::model::extension::ExtensionTagRegistry;
 use crate::parse_edid;
 use crate::parser::EDID_HEADER;
@@ -286,25 +287,55 @@ fn options_default_to_larger_and_room_for_every_block() {
 
 #[test]
 fn errors_and_warnings_describe_themselves() {
-    use core::fmt::Write;
-    let mut text = heapless_string();
-    write!(text, "{}", ReadError::Complete).unwrap();
-    write!(text, "{}", ReadError::BaseBlock(EdidError::InvalidHeader)).unwrap();
-    write!(
-        text,
-        "{}",
-        ReadWarning::BlocksNotRead { wanted: 4, read: 2 }
-    )
-    .unwrap();
-    assert!(text.0.starts_with(b"the read is complete"));
+    fn text(value: impl core::fmt::Display) -> Text {
+        use core::fmt::Write;
+        let mut text = Text([0; 160], 0);
+        write!(text, "{value}").unwrap();
+        text
+    }
+    let cases: [(Text, &str); 7] = [
+        (
+            text(EdidWarning::HfEeodbMisplaced { block: Some(2) }),
+            "HF-EEODB in block 2, not the first data block of block 1; it declares nothing",
+        ),
+        (
+            text(EdidWarning::HfEeodbMisplaced { block: None }),
+            "HF-EEODB in a DisplayID CTA block, not the first data block of block 1; it declares nothing",
+        ),
+        (
+            text(ReadError::Complete),
+            "the read is complete; no block was asked for",
+        ),
+        (
+            text(ReadError::BaseBlock(EdidError::InvalidHeader)),
+            "base block: EDID header not found at offset 0",
+        ),
+        (
+            text(ReadWarning::ChecksumMismatch { block: 2 }),
+            "block 2 has a bad checksum",
+        ),
+        (
+            text(ReadWarning::HfEeodbBelowDeclared {
+                declared: 3,
+                hf_eeodb: 1,
+            }),
+            "HF-EEODB declares 1 extension block(s), byte 126 declares 3",
+        ),
+        (
+            text(ReadWarning::BlocksNotRead {
+                edid_blocks: 4,
+                read: 2,
+            }),
+            "the EDID has 4 block(s), 2 were read; the rest were not",
+        ),
+    ];
+    for (text, expected) in cases {
+        assert_eq!(&text.0[..text.1], expected.as_bytes());
+    }
 }
 
 /// A fixed-size text buffer, for `Display` without `alloc`.
-struct Text([u8; 512], usize);
-
-fn heapless_string() -> Text {
-    Text([0; 512], 0)
-}
+struct Text([u8; 160], usize);
 
 impl core::fmt::Write for Text {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {

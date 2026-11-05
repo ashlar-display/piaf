@@ -63,6 +63,11 @@ use extended_blocks::{
 #[cfg(any(feature = "alloc", feature = "std"))]
 use hdmi_vsdb::parse_hdmi_vsdb;
 /// Processes a CEA-861 extension block (tag `0x02`).
+///
+/// An HF-EEODB counts only in the EDID's block 1, so the handler needs the blocks' EDID
+/// numbers to read it ([`HandlerContext::block_number`]): the capability pipelines pass
+/// them; [`ExtensionHandler::process`] called directly does not, and then leaves
+/// `hf_eeodb_extension_count` `None` and does not check where an HF-EEODB sits.
 #[derive(Debug)]
 pub struct Cea861Handler;
 
@@ -115,6 +120,7 @@ impl ExtensionHandler for Cea861Handler {
             if collection_end > 4 {
                 parse_cea861_data_block_collection(
                     &ext[4..collection_end],
+                    CollectionPlace::CtaBlock(block),
                     caps,
                     &mut cea_caps,
                     warnings,
@@ -157,6 +163,7 @@ impl ExtensionHandler for Cea861Handler {
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub(crate) fn parse_cea861_data_block_collection(
     collection: &[u8],
+    place: CollectionPlace,
     caps: &mut DisplayCapabilities,
     cea_caps: &mut Cea861Capabilities,
     warnings: &mut Vec<ParseWarning>,
@@ -164,6 +171,7 @@ pub(crate) fn parse_cea861_data_block_collection(
 ) {
     let mut i = 0;
     while i < collection.len() {
+        let first = i == 0;
         let header = collection[i];
 
         // A zero header byte is padding — stop scanning.
@@ -210,12 +218,42 @@ pub(crate) fn parse_cea861_data_block_collection(
                 cea_caps.vesa_transfer_characteristic =
                     parse_vesa_transfer_characteristic(block_data);
             }
-            0x07 => handle_extended_tag_block(block_data, caps, cea_caps, options),
+            0x07 => {
+                if block_data.first() == Some(&EXT_TAG_HF_EEODB) {
+                    check_hf_eeodb_place(place, first, warnings);
+                }
+                handle_extended_tag_block(block_data, caps, cea_caps, options);
+            }
             _ => {}
         }
 
         i += length;
     }
+}
+
+/// Where a CTA-861 data block collection comes from, for the one data block whose place
+/// matters: an HF-EEODB counts only as the first data block of block 1.
+#[cfg(any(feature = "alloc", feature = "std"))]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CollectionPlace {
+    /// A CTA-861 extension block, with its EDID block number when the caller knows it.
+    CtaBlock(Option<u8>),
+    /// A DisplayID CTA block (`0x81`).
+    DisplayId,
+}
+
+/// Warns about an HF-EEODB anywhere but the first data block of block 1, where it declares
+/// nothing ([`crate::parser::hf_eeodb_extension_count`]). Without a block number the place
+/// is unknown, and nothing is said.
+#[cfg(any(feature = "alloc", feature = "std"))]
+fn check_hf_eeodb_place(place: CollectionPlace, first: bool, warnings: &mut Vec<ParseWarning>) {
+    let block = match place {
+        CollectionPlace::CtaBlock(None) => return,
+        CollectionPlace::CtaBlock(Some(1)) if first => return,
+        CollectionPlace::CtaBlock(block) => block,
+        CollectionPlace::DisplayId => None,
+    };
+    warnings.push(Arc::new(EdidWarning::HfEeodbMisplaced { block }));
 }
 
 /// Pushes `mode` to `modes` only if no entry with the same
