@@ -54,6 +54,20 @@ fn edid_warning_struct_variants() {
     });
 }
 
+#[test]
+fn read_warnings() {
+    use piaf::read::ReadWarning;
+    assert_round_trips(ReadWarning::ChecksumMismatch { block: 2 });
+    assert_round_trips(ReadWarning::HfEeodbBelowDeclared {
+        declared: 3,
+        hf_eeodb: 1,
+    });
+    assert_round_trips(ReadWarning::BlocksNotRead {
+        edid_blocks: 4,
+        read: 2,
+    });
+}
+
 // ---------------------------------------------------------------------------
 // ManufactureDate
 // ---------------------------------------------------------------------------

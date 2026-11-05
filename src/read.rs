@@ -172,13 +172,17 @@ pub enum ReadWarning {
         /// The extension count the HF-EEODB declares.
         hf_eeodb: u8,
     },
-    /// The EDID has more blocks to read than the caller holds; `wanted - read` were not
-    /// read.
-    #[error("{wanted} block(s) to read, room for {read}; the rest were not read")]
+    /// The EDID has more blocks than the caller holds ([`ReadOptions::capacity`]);
+    /// `edid_blocks - read` of them were not read.
+    ///
+    /// The EDID's blocks as far as the blocks read tell: byte 126's count when the read
+    /// stopped before block 1, [`ExtensionCount::extensions`] after it. Blocks
+    /// [`ReadCount::Larger`] would read beyond the EDID are not counted.
+    #[error("the EDID has {edid_blocks} block(s), {read} were read; the rest were not")]
     BlocksNotRead {
-        /// The blocks the read wanted, the base block included.
-        wanted: u16,
-        /// The blocks read: [`ReadOptions::capacity`].
+        /// The EDID's blocks, the base block included.
+        edid_blocks: u16,
+        /// The blocks read: the caller's capacity.
         read: u16,
     },
 }
@@ -283,22 +287,21 @@ impl EdidReadPlan {
                 }
                 _ => None,
             });
-        let capacity = self.capacity();
-        let wanted = self.wanted();
-        let not_read =
-            (self.read == capacity && wanted > capacity).then_some(ReadWarning::BlocksNotRead {
-                wanted,
-                read: capacity,
-            });
+        let edid_blocks = self.edid_blocks();
+        let not_read = (self.next().is_none() && edid_blocks > self.read).then_some(
+            ReadWarning::BlocksNotRead {
+                edid_blocks,
+                read: self.read,
+            },
+        );
         bad.chain(below).chain(not_read)
     }
 
-    /// The caller's capacity, at least the base block.
+    /// The caller's capacity, at least the base block. A capacity above 256 is never
+    /// reached: the read wants at most 256 blocks.
     const fn capacity(&self) -> u16 {
         if self.options.capacity == 0 {
             1
-        } else if self.options.capacity > MAX_BLOCKS {
-            MAX_BLOCKS
         } else {
             self.options.capacity
         }
