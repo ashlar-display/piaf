@@ -9,6 +9,10 @@ PIAF reads and interprets EDID data as an input to display capability discovery.
 The library covers:
 
 - parsing and validation of raw byte slices — header verification, checksum, EDID version (1.x only), and block structure,
+  sized by one block-count rule (`ExtensionCount`: byte 126, and block 1's HF-EEODB when present),
+- an I/O-free read plan (`read::EdidReadPlan`) for reading an EDID from a sink: which block to read
+  next and at which E-DDC segment and offset, how many blocks, which came back bad — the transport
+  stays the caller's,
 - full decoding of the EDID base block into typed fields,
 - extension block dispatch via a pluggable handler system,
 - full CEA-861 extension decoding covering all major data block types,
@@ -79,7 +83,15 @@ flowchart LR
 
 ### Input
 
-The input layer is responsible only for obtaining byte buffers. In the earliest versions of PIAF, this is simply a caller-provided byte slice.
+The input layer is responsible only for obtaining byte buffers: a caller-provided byte slice, from a
+file, a kernel sysfs node, a platform API or a bus.
+
+For reading from a sink over DDC, `read::EdidReadPlan` holds the structure knowledge without the
+I/O: the caller reads the block the plan names (its number, E-DDC segment and offset), hands it
+over, and repeats until the plan is complete. The plan sizes the read by the same rule as the
+parser (`ExtensionCount`), reports bad checksums and blocks beyond the caller's capacity, and
+leaves whether to read a block again to the caller. It keeps no copy of the blocks, so it runs
+without `alloc`; thin drivers run it over a bus (for example `hdmi-hal`'s planned `DdcBus`).
 
 Future versions may include helpers for reading from platform-specific sources, but transport concerns should remain outside the core parser.
 
@@ -87,7 +99,8 @@ Future versions may include helpers for reading from platform-specific sources, 
 
 The parser is responsible for:
 
-- validating expected block sizes,
+- validating expected block sizes, with the EDID sized by byte 126 or, when block 1 carries one,
+  the HF-EEODB count (`ExtensionCount`),
 - checking structural markers,
 - verifying checksums,
 - checking the EDID version (1.x only),

@@ -284,9 +284,6 @@ pub enum EdidWarning {
     /// A DTD slot was skipped because the pixel clock value would overflow during
     /// refresh rate calculation. Indicates a malformed or corrupted EDID.
     DtdPixelClockOverflow,
-    /// The extension block count declared in the base block exceeds the parser's
-    /// safety limit; only the first `limit` blocks were parsed.
-    ExtensionBlockLimitReached { declared: usize, limit: usize },
     /// A DisplayID extension block carries an unrecognised version byte.
     DisplayIdVersionUnknown(u8),
     /// The extension count in a DisplayID section header does not match the number
@@ -300,9 +297,19 @@ pub enum EdidWarning {
     /// A DisplayID Transfer Characteristics block carries a reserved encoding byte
     /// (bits 7:6 = `0b11`). The block is skipped.
     UnknownTransferEncoding(u8),
-    /// Byte slice length differs from `(1 + extension_count) × 128`.
-    /// Extra bytes are ignored; too few is a hard `EdidError::InvalidLength`.
+    /// The byte slice is longer than `(1 + count) × 128`, `count` the larger of byte 126
+    /// and the HF-EEODB count, or ends in a partial block. Extra bytes are ignored; fewer
+    /// blocks than the smaller count is a hard `EdidError::InvalidLength`.
     SizeMismatch { expected: usize, actual: usize },
+    /// Block 1's HF-EEODB declares fewer extension blocks than byte 126; the EDID ends at
+    /// the HF-EEODB count.
+    HfEeodbBelowDeclared { declared: u8, hf_eeodb: u8 },
+    /// Block 1's HF-EEODB declares more blocks than the input holds (it holds byte 126's);
+    /// the blocks present are parsed.
+    HfEeodbBlocksMissing { hf_eeodb: u8, present: u8 },
+    /// An HF-EEODB outside the first data block of block 1 (`None`: in a DisplayID CTA
+    /// block); it declares nothing.
+    HfEeodbMisplaced { block: Option<u8> },
     /// A timing descriptor with a pixel clock but a zero active area or blanking.
     DtdGeometryInvalid { h_active: u16, h_blank: u16, v_active: u16, v_blank: u16 },
     /// The EDID has a preferred timing, but slot 0 is not a timing.

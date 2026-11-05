@@ -36,6 +36,12 @@ debugging, or run multiple handler configurations over the same parsed data with
 With `alloc` or `std`, use `parse_edid_owned` to get an owned `ParsedEdid` that can outlive the
 input buffer.
 
+Reading the bytes from a sink stays the caller's: piaf does no I/O. `read::EdidReadPlan` holds
+what a reader needs to know — which block to read next and at which E-DDC segment and offset,
+how many blocks the EDID has (byte 126 and the HF-EEODB, the rule `parse_edid` sizes it by),
+which blocks came back with a bad checksum — without `alloc` and without keeping the blocks.
+A driver runs it over a bus and hands the blocks it read to `parse_edid`.
+
 ```rust
 use piaf::{parse_edid, capabilities_from_edid, ExtensionLibrary, ScreenSize};
 

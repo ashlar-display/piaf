@@ -708,7 +708,14 @@ pub(super) fn decode_v2_cta_displayid_block(
                 crate::capabilities::cea861::Cea861Flags::empty(),
             )
         });
-    parse_cea861_data_block_collection(payload, caps, &mut cea_caps, warnings, options);
+    parse_cea861_data_block_collection(
+        payload,
+        crate::capabilities::cea861::CollectionPlace::DisplayId,
+        caps,
+        &mut cea_caps,
+        warnings,
+        options,
+    );
     caps.set_extension_data(0x02, cea_caps);
 }
 
@@ -4515,6 +4522,30 @@ mod tests {
         out.push(collection.len() as u8);
         out.extend_from_slice(collection);
         out
+    }
+
+    #[test]
+    fn test_v2_cta_displayid_reports_an_hf_eeodb_as_misplaced() {
+        let payload = make_v2_cta_displayid_block(0, &[(7 << 5) | 2, 0x78, 3]);
+        let mut caps = DisplayCapabilities::default();
+        let mut did = DisplayIdCapabilities::new(0x20, 0);
+        let mut warnings: Vec<ParseWarning> = Vec::new();
+        scan_all_metadata_blocks(
+            &payload,
+            DISPLAYID_V2,
+            &mut caps,
+            &mut did,
+            &mut warnings,
+            &DecodeOptions::new(),
+        );
+        assert!(warnings.iter().any(|w| {
+            (**w).downcast_ref::<EdidWarning>()
+                == Some(&EdidWarning::HfEeodbMisplaced { block: None })
+        }));
+        let cea = caps
+            .get_extension_data::<crate::capabilities::cea861::Cea861Capabilities>(0x02)
+            .unwrap();
+        assert_eq!(cea.hf_eeodb_extension_count, None);
     }
 
     #[test]

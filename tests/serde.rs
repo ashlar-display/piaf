@@ -36,10 +36,16 @@ fn edid_warning_simple_variants() {
 
 #[test]
 fn edid_warning_struct_variants() {
-    assert_round_trips(EdidWarning::ExtensionBlockLimitReached {
-        declared: 10,
-        limit: 6,
+    assert_round_trips(EdidWarning::HfEeodbBelowDeclared {
+        declared: 3,
+        hf_eeodb: 1,
     });
+    assert_round_trips(EdidWarning::HfEeodbBlocksMissing {
+        hf_eeodb: 3,
+        present: 1,
+    });
+    assert_round_trips(EdidWarning::HfEeodbMisplaced { block: Some(2) });
+    assert_round_trips(EdidWarning::HfEeodbMisplaced { block: None });
     assert_round_trips(EdidWarning::DisplayIdExtensionCountMismatch {
         declared: 2,
         found: 1,
@@ -47,6 +53,20 @@ fn edid_warning_struct_variants() {
     assert_round_trips(EdidWarning::SizeMismatch {
         expected: 384,
         actual: 256,
+    });
+}
+
+#[test]
+fn read_warnings() {
+    use piaf::read::ReadWarning;
+    assert_round_trips(ReadWarning::ChecksumMismatch { block: 2 });
+    assert_round_trips(ReadWarning::HfEeodbBelowDeclared {
+        declared: 3,
+        hf_eeodb: 1,
+    });
+    assert_round_trips(ReadWarning::BlocksNotRead {
+        edid_blocks: 4,
+        read: 2,
     });
 }
 
