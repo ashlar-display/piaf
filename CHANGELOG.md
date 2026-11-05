@@ -34,9 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `push(block)` takes it, until `next()` is `None`. It sizes the read with `ExtensionCount`;
   `ReadOptions` chooses how many blocks to read when byte 126 and the HF-EEODB differ
   (`ReadCount::Larger`, as Linux, the default; `ReadCount::Edid`, as Amlogic) and the most
-  blocks the caller holds. A base block that fails `parse_edid`'s checks is refused
-  (`ReadError::BaseBlock`) and asked for again; `warnings()` reports extension blocks with a
-  bad checksum, an HF-EEODB below byte 126, and blocks beyond the caller's capacity
+  blocks the caller holds. Whatever the options, `parse_edid` takes a complete read. A base
+  block that fails `parse_edid`'s checks is refused (`ReadError::BaseBlock`) and asked for
+  again, so a driver bounds its retries; `warnings()` reports extension blocks with a bad
+  checksum, an HF-EEODB below byte 126, and the EDID's blocks beyond the caller's capacity
   (`ReadWarning`). It keeps no copy of the blocks and needs no `alloc`; whether to read a
   block again is the caller's, with `parser::block_checksum_valid`.
 - **`ExtensionCount`**: the rule for how many extension blocks an EDID has, from its base

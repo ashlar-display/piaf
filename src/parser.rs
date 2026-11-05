@@ -140,12 +140,13 @@ pub const MAX_PARSE_WARNINGS: usize = 8;
 /// generate an [`EdidWarning::UnknownExtension`] warning.
 ///
 /// The EDID's extension blocks are [`ExtensionCount::extensions`]: the HF-EEODB count when
-/// block 1 carries one, otherwise byte 126. The input must hold the blocks byte 126
-/// declares ([`EdidError::InvalidLength`] otherwise). When an HF-EEODB declares more and
-/// the input stops short of them, as a reader that does not know HF-EEODB returns the EDID,
-/// the blocks present are parsed with [`EdidWarning::HfEeodbBlocksMissing`]; one that
-/// declares fewer than byte 126 ends the EDID there, with
-/// [`EdidWarning::HfEeodbBelowDeclared`].
+/// block 1 carries one, otherwise byte 126. The input must hold the blocks both counts
+/// declare, the smaller of the two ([`EdidError::InvalidLength`] otherwise). When an
+/// HF-EEODB declares more than byte 126 and the input stops short of them, as a reader that
+/// does not know HF-EEODB returns the EDID, the blocks present are parsed with
+/// [`EdidWarning::HfEeodbBlocksMissing`]; one that declares fewer ends the EDID there, with
+/// [`EdidWarning::HfEeodbBelowDeclared`], whether the input holds byte 126's further blocks
+/// or not.
 ///
 /// Pass an [`ExtensionLibrary`][crate::ExtensionLibrary], an
 /// [`ExtensionTagRegistry`][crate::ExtensionTagRegistry], or a
@@ -167,14 +168,20 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
     check_base_block(base_block)?;
 
     let declared = usize::from(base_block[126]);
-    if bytes.len() < 128 * (1 + declared) {
+    // Block 1 first: an HF-EEODB in it says how many blocks the EDID has.
+    if declared > 0 && bytes.len() < 256 {
         return Err(EdidError::InvalidLength);
     }
 
     let block1: Option<&[u8; 128]> = (declared > 0).then(|| bytes[128..256].try_into().unwrap());
     let count = ExtensionCount::new(base_block, block1);
     let extensions = usize::from(count.extensions());
-    // Whole blocks after the base block; at least `declared`, checked above.
+    // The blocks both counts declare: an EDID that ends at a smaller HF-EEODB count is
+    // complete, as is one that holds only byte 126's blocks of a larger one.
+    if bytes.len() < 128 * (1 + declared.min(extensions)) {
+        return Err(EdidError::InvalidLength);
+    }
+    // Whole blocks after the base block; at least the count checked above.
     let present = (bytes.len() - 128) / 128;
 
     let mut warnings = ParseWarnings::default();
@@ -665,6 +672,35 @@ mod tests {
                     declared: 3,
                     hf_eeodb: 1
                 }])
+        );
+    }
+
+    #[test]
+    fn test_parse_edid_takes_an_edid_that_ends_at_a_smaller_hf_eeodb_count() {
+        // As a reader that reads the HF-EEODB count returns it (Amlogic).
+        let (bytes, len) = edid_with_hf_eeodb(3, 1, 1);
+        let parsed = parse_known(&bytes[..len]);
+        assert_eq!(parsed.num_extensions, 1);
+        assert!(
+            parsed
+                .iter_warnings()
+                .eq([&EdidWarning::HfEeodbBelowDeclared {
+                    declared: 3,
+                    hf_eeodb: 1
+                }])
+        );
+
+        // One of byte 126's two further blocks.
+        let (bytes, len) = edid_with_hf_eeodb(3, 1, 2);
+        assert_eq!(parse_known(&bytes[..len]).num_extensions, 1);
+    }
+
+    #[test]
+    fn test_parse_edid_needs_block_1_when_byte_126_declares_it() {
+        let (bytes, _) = edid_with_hf_eeodb(1, 3, 1);
+        assert_eq!(
+            parse_edid(&bytes[..200], &ExtensionTagRegistry::new()).unwrap_err(),
+            EdidError::InvalidLength
         );
     }
 

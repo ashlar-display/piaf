@@ -245,6 +245,27 @@ fn the_read_stops_at_the_callers_capacity() {
     assert_eq!(run(&mut plan, &sink, &mut [[0u8; 128]; 4]), 4);
 }
 
+/// Every rule, with the HF-EEODB above, below and without byte 126: what the plan reads,
+/// `parse_edid` takes, as the EDID's blocks.
+#[test]
+fn parse_edid_takes_every_read() {
+    let above = [base(1), cta_with_hf_eeodb(3), extension(2), extension(3)];
+    let below = [base(3), cta_with_hf_eeodb(1), extension(2), extension(3)];
+    let without = [base(3), extension(1), extension(2), extension(3)];
+    for (blocks, edid) in [(&above, 3), (&below, 1), (&without, 3)] {
+        for rule in [ReadCount::Larger, ReadCount::Edid] {
+            let sink = Sink { blocks };
+            let mut plan = EdidReadPlan::new(ReadOptions::new().with_read_count(rule));
+            let mut buffer = [[0u8; 128]; 4];
+            let read = run(&mut plan, &sink, &mut buffer);
+            let bytes = &buffer.as_flattened()[..128 * read];
+            let parsed = parse_edid(bytes, &ExtensionTagRegistry::new())
+                .unwrap_or_else(|e| panic!("{rule:?}, {read} blocks: {e}"));
+            assert_eq!(parsed.num_extensions, edid, "{rule:?}");
+        }
+    }
+}
+
 #[test]
 fn an_edid_without_extensions_is_one_block() {
     let mut plan = EdidReadPlan::new(ReadOptions::default());
