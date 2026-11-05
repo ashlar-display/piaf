@@ -72,6 +72,8 @@ pub use model::ParsedEdid;
 pub use parser::parse_edid_owned;
 pub use parser::{ExtensionCount, hf_eeodb_extension_count, parse_edid};
 
+pub mod read;
+
 /// Capability extraction from a parsed EDID ([`EdidSource`]).
 pub mod capabilities;
 pub use capabilities::Cea861Flags;

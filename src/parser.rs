@@ -43,6 +43,29 @@ pub fn hf_eeodb_extension_count(block1: &[u8; 128]) -> Option<u8> {
     core::num::NonZeroU8::new(block1[6]).map(core::num::NonZeroU8::get)
 }
 
+/// Whether `block`'s bytes sum to zero mod 256, as every EDID block's must: its last byte
+/// is its checksum.
+pub fn block_checksum_valid(block: &[u8; 128]) -> bool {
+    block.iter().fold(0u8, |acc, &x| acc.wrapping_add(x)) == 0
+}
+
+/// The checks a base block passes before its contents are trusted: the header, the
+/// checksum, then the version byte (a corrupt block's version byte cannot be trusted).
+pub(crate) fn check_base_block(base: &[u8; 128]) -> Result<(), EdidError> {
+    if base[0..8] != EDID_HEADER {
+        return Err(EdidError::InvalidHeader);
+    }
+    if !block_checksum_valid(base) {
+        return Err(EdidError::ChecksumMismatch);
+    }
+    if base[0x12] != 1 {
+        return Err(EdidError::UnsupportedVersion {
+            version: base[0x12],
+        });
+    }
+    Ok(())
+}
+
 /// How many extension blocks an EDID has: byte 126 of its base block, and the HF-EEODB
 /// count when block 1 carries one.
 ///
@@ -65,6 +88,12 @@ impl ExtensionCount {
             Some(block1) if declared > 0 => hf_eeodb_extension_count(block1),
             _ => None,
         };
+        ExtensionCount { declared, hf_eeodb }
+    }
+
+    /// The count from what has been read: `declared`, byte 126, and `hf_eeodb`, block 1's
+    /// HF-EEODB count, already read under [`hf_eeodb_extension_count`]'s rule.
+    pub(crate) const fn from_parts(declared: u8, hf_eeodb: Option<u8>) -> Self {
         ExtensionCount { declared, hf_eeodb }
     }
 
@@ -132,22 +161,7 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
     }
 
     let base_block: &'a [u8; 128] = bytes[0..128].try_into().unwrap();
-
-    if base_block[0..8] != EDID_HEADER {
-        return Err(EdidError::InvalidHeader);
-    }
-
-    let checksum: u8 = base_block.iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
-    if checksum != 0 {
-        return Err(EdidError::ChecksumMismatch);
-    }
-
-    // After the checksum: a corrupt block's version byte cannot be trusted.
-    if base_block[0x12] != 1 {
-        return Err(EdidError::UnsupportedVersion {
-            version: base_block[0x12],
-        });
-    }
+    check_base_block(base_block)?;
 
     let declared = usize::from(base_block[126]);
     if bytes.len() < 128 * (1 + declared) {
@@ -193,8 +207,7 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
     for i in 0..blocks_to_parse {
         let start = 128 + i * 128;
         let ext_block: &[u8; 128] = bytes[start..start + 128].try_into().unwrap();
-        let ext_sum: u8 = ext_block.iter().fold(0u8, |acc, &x| acc.wrapping_add(x));
-        if ext_sum != 0 {
+        if !block_checksum_valid(ext_block) {
             return Err(EdidError::ChecksumMismatch);
         }
         let tag = ext_block[0];

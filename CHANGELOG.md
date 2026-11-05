@@ -27,9 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An I/O-free read plan, `read::EdidReadPlan`**, for reading an EDID from a sink without
+  piaf doing I/O: `next()` names the block to read and its E-DDC segment and offset,
+  `push(block)` takes it, until `next()` is `None`. It sizes the read with `ExtensionCount`;
+  `ReadOptions` chooses how many blocks to read when byte 126 and the HF-EEODB differ
+  (`ReadCount::Larger`, as Linux, the default; `ReadCount::Edid`, as Amlogic) and the most
+  blocks the caller holds. A base block that fails `parse_edid`'s checks is refused
+  (`ReadError::BaseBlock`) and asked for again; `warnings()` reports extension blocks with a
+  bad checksum, an HF-EEODB below byte 126, and blocks beyond the caller's capacity
+  (`ReadWarning`). It keeps no copy of the blocks and needs no `alloc`; whether to read a
+  block again is the caller's, with `parser::block_checksum_valid`.
 - **`ExtensionCount`**: the rule for how many extension blocks an EDID has, from its base
   block and block 1: `declared()` (byte 126), `hf_eeodb()` and `extensions()`, the EDID's
-  count. `parse_edid` uses it; so does the coming read plan.
+  count; `to_read(ReadCount)`, the blocks a read takes. `parse_edid` and the read plan use
+  it.
 - **`hf_eeodb_extension_count`**: the count an HF-EEODB declares, read from block 1 under
   Linux's checks (a CTA-861 revision 3 block, the HF-EEODB at bytes 4–6).
 - **`EdidWarning::HfEeodbBlocksMissing { hf_eeodb, present }`** and
