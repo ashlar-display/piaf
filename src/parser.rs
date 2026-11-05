@@ -80,12 +80,15 @@ pub struct ExtensionCount {
 
 impl ExtensionCount {
     /// The count for an EDID with base block `base` and, when byte 126 declares at least one
-    /// extension, block 1. Without block 1 (not read yet), the HF-EEODB count is unknown and
-    /// [`extensions`](Self::extensions) is byte 126.
+    /// extension, block 1. Without block 1 (not read yet), or with a block 1 whose checksum
+    /// is bad, the HF-EEODB count is unknown and [`extensions`](Self::extensions) is byte
+    /// 126: Linux reads the HF-EEODB only from a valid block 1.
     pub fn new(base: &[u8; 128], block1: Option<&[u8; 128]>) -> Self {
         let declared = base[126];
         let hf_eeodb = match block1 {
-            Some(block1) if declared > 0 => hf_eeodb_extension_count(block1),
+            Some(block1) if declared > 0 && block_checksum_valid(block1) => {
+                hf_eeodb_extension_count(block1)
+            }
             _ => None,
         };
         ExtensionCount { declared, hf_eeodb }
@@ -574,7 +577,8 @@ mod tests {
     #[test]
     fn test_extension_count_takes_hf_eeodb_when_present() {
         let mut base = base_with_version(1);
-        let block1 = cta_with_hf_eeodb(3);
+        let mut block1 = cta_with_hf_eeodb(3);
+        set_checksum(&mut block1);
 
         base[126] = 1;
         let count = ExtensionCount::new(&base, Some(&block1));
@@ -598,6 +602,17 @@ mod tests {
         base[126] = 0;
         let count = ExtensionCount::new(&base, Some(&block1));
         assert_eq!((count.hf_eeodb(), count.extensions()), (None, 0));
+    }
+
+    #[test]
+    fn test_extension_count_ignores_hf_eeodb_in_a_bad_block_1() {
+        let mut base = base_with_version(1);
+        base[126] = 1;
+        let mut block1 = cta_with_hf_eeodb(3);
+        set_checksum(&mut block1);
+        block1[127] ^= 1;
+        let count = ExtensionCount::new(&base, Some(&block1));
+        assert_eq!((count.hf_eeodb(), count.extensions()), (None, 1));
     }
 
     #[test]

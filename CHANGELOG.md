@@ -15,8 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real count) had its further blocks reported as `SizeMismatch` and left unparsed; they are
   now parsed, so the output for such EDIDs changes. Input that holds only byte 126's blocks
   still parses, with `HfEeodbBlocksMissing`; an HF-EEODB smaller than byte 126 ends the
-  EDID there, with `HfEeodbBelowDeclared`. `SizeMismatch` reports bytes beyond the larger of
-  the two counts.
+  EDID there, with `HfEeodbBelowDeclared`, and input that ends there parses too (it had to
+  hold byte 126's blocks). An HF-EEODB in a block 1 with a bad checksum is not trusted.
+  `SizeMismatch` reports bytes beyond the larger of the two counts, and a partial block at
+  the end.
 - **`Cea861Capabilities::hf_eeodb_extension_count` comes from block 1 only.** It took the
   first HF-EEODB in any CTA-861 block; it now takes the one at bytes 4–6 of block 1, the
   only place an HF-EEODB counts, and `None` for one elsewhere.
@@ -42,7 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count; `to_read(ReadCount)`, the blocks a read takes. `parse_edid` and the read plan use
   it.
 - **`hf_eeodb_extension_count`**: the count an HF-EEODB declares, read from block 1 under
-  Linux's checks (a CTA-861 revision 3 block, the HF-EEODB at bytes 4–6).
+  Linux's checks (a CTA-861 block of revision 3 or later, the HF-EEODB at bytes 4–6).
+  `ExtensionCount::new` also requires block 1's checksum, as Linux does.
 - **`EdidWarning::HfEeodbBlocksMissing { hf_eeodb, present }`** and
   **`EdidWarning::HfEeodbBelowDeclared { declared, hf_eeodb }`**.
 
