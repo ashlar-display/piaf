@@ -228,7 +228,8 @@ pub enum EdidWarning {
         /// Revision byte (second byte of the 3-byte data block header) as found.
         revision: u8,
     },
-    /// The byte slice is longer than the EDID's block counts account for.
+    /// The byte slice is longer than the EDID's block counts account for, or ends in a
+    /// partial block.
     ///
     /// The counts are byte 126 of the base block and, when block 1 carries one, the
     /// HF-EEODB count ([`ExtensionCount`](crate::parser::ExtensionCount)); the expected size

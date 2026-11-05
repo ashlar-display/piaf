@@ -298,8 +298,8 @@ pub enum EdidWarning {
     /// (bits 7:6 = `0b11`). The block is skipped.
     UnknownTransferEncoding(u8),
     /// The byte slice is longer than `(1 + count) × 128`, `count` the larger of byte 126
-    /// and the HF-EEODB count. Extra bytes are ignored; fewer than byte 126's blocks is a
-    /// hard `EdidError::InvalidLength`.
+    /// and the HF-EEODB count, or ends in a partial block. Extra bytes are ignored; fewer
+    /// blocks than the smaller count is a hard `EdidError::InvalidLength`.
     SizeMismatch { expected: usize, actual: usize },
     /// Block 1's HF-EEODB declares fewer extension blocks than byte 126; the EDID ends at
     /// the HF-EEODB count.

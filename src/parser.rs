@@ -206,8 +206,9 @@ pub fn parse_edid<'a, T: KnownExtensions + ?Sized>(
         });
     }
 
+    // Bytes beyond what either count accounts for, or a partial block at the end.
     let accounted = 128 * (1 + declared.max(extensions));
-    if bytes.len() > accounted {
+    if bytes.len() > accounted || (bytes.len() < accounted && bytes.len() % 128 != 0) {
         warnings.push(EdidWarning::SizeMismatch {
             expected: accounted,
             actual: bytes.len(),
@@ -693,6 +694,23 @@ mod tests {
         // One of byte 126's two further blocks.
         let (bytes, len) = edid_with_hf_eeodb(3, 1, 2);
         assert_eq!(parse_known(&bytes[..len]).num_extensions, 1);
+    }
+
+    #[test]
+    fn test_parse_edid_reports_a_partial_block_at_the_end() {
+        let (bytes, len) = edid_with_hf_eeodb(1, 3, 1);
+        let parsed = parse_known(&bytes[..len + 64]);
+        assert_eq!(parsed.num_extensions, 1);
+        assert!(parsed.iter_warnings().eq([
+            &EdidWarning::HfEeodbBlocksMissing {
+                hf_eeodb: 3,
+                present: 1
+            },
+            &EdidWarning::SizeMismatch {
+                expected: 128 * 4,
+                actual: 128 * 2 + 64
+            }
+        ]));
     }
 
     #[test]
