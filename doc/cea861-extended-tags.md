@@ -112,7 +112,10 @@ Byte 3:  EDID Extension Block Count (override value; 0 = invalid)
 
 Must be the **first data block** in Block 1 (the first CTA-861 extension). Overrides the
 1-byte extension count in the base EDID header for HDMI 2.1 sinks whose full E-EDID
-exceeds what the base EDID byte can represent. Exposed as
+exceeds what the base EDID byte can represent. Counts only there, at bytes 4–6 of a
+CTA-861 revision 3 block, as Linux and Amlogic read it (`piaf::hf_eeodb_extension_count`);
+one elsewhere declares nothing. `parse_edid` sizes the EDID by it
+(`piaf::ExtensionCount`), and it is exposed as
 `Cea861Capabilities::hf_eeodb_extension_count: Option<u8>`.
 
 ### HDMI Forum Sink Capability Data Block (`0x79`)
