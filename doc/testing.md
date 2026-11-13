@@ -117,6 +117,20 @@ The minimised corpus lives in `fuzz/corpus/<target>/` and should be committed so
 
 The fuzz workflow (`.github/workflows/fuzz.yml`) runs a 60-second smoke test on every push and pull request, and a 1-hour deep run on a weekly schedule. The corpus is cached between runs using GitHub Actions cache. Crash artifacts are uploaded automatically on failure.
 
+## Feature sets
+
+CI runs the tests with the default features, with `serde`, with `alloc` only and with no
+default features, on stable and on the MSRV. The examples and integration tests declare
+`required-features = ["alloc"]`, so without `alloc` Cargo skips them and the library's own
+tests cover the bare `no_std` paths (the static pipeline without `BaseBlockHandler`). The
+bare `no_std` and `alloc`-only builds are compiled for `thumbv7em-none-eabi`, which has no
+`std`.
+
+The README's Rust examples run as doctests (`ReadmeDoctests` in `src/lib.rs`). Examples
+that need an EDID or a file are compiled inside a hidden function that is never called, and
+examples that need `alloc` are wrapped in a hidden `#[cfg(feature = "alloc")]`, so each
+build compiles what exists in it.
+
 ## Test philosophy
 
 PIAF should be strict about structural integrity, but practical about diagnostics.

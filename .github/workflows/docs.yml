@@ -1,0 +1,36 @@
+name: Docs (docs.rs)
+
+# docs.rs builds the documentation with nightly and `--cfg docsrs`, which turns on the
+# nightly-only `doc_cfg` feature badges. Build it the same way weekly and on demand, so
+# a nightly change to `doc_cfg` shows up here before it breaks a docs.rs build. Not on
+# pull requests: a nightly regression must not block unrelated changes.
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  docs:
+    name: Docs as on docs.rs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: nightly
+
+      - name: Build the docs as docs.rs does
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+        run: cargo doc --locked --all-features --no-deps

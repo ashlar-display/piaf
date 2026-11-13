@@ -13,6 +13,10 @@ on:
     - cron: '0 2 * * 6'  # weekly, Saturday 02:00 UTC
   workflow_dispatch:       # allow manual trigger
 
+# Read-only: the job only reads the repository and uploads crash artifacts.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -28,6 +32,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1

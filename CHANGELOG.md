@@ -7,6 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **docs.rs marks the items that need a feature** (`alloc`, `std`, `serde`) with the
+  `doc_cfg` badge, enabled only in docs.rs builds.
+
+### Changed
+
+- **crates.io lists piaf under `no-std` and `no-std::no-alloc`**: it builds without
+  `std` and without `alloc` (the static pipeline), but listed neither category.
+- **The README's Ashlar block links the stack's crate list** instead of naming every crate,
+  so it no longer goes stale on crates.io when a crate is added.
+
+### Fixed
+
+- **The crate-level example compiles without `alloc`**: it uses `ExtensionLibrary`, which
+  needs `alloc`, so `cargo test --no-default-features` failed on it; it now runs only where
+  that type exists.
+- **The README's examples compile against the current API.** The usage example printed
+  `mode.refresh_rate` with `{}`, but it is an `Option<RefreshRate>`; the dynamic handler
+  example did not import `ExtensionMetadata`; the static handler example did not import
+  `StaticContext`.
+
+### Internal
+
+- **The README's Rust examples run as doctests** (`ReadmeDoctests` in `lib.rs`, compiled
+  only for `cargo test`): the self-contained ones run, the ones that need an EDID or a
+  file are compiled inside a hidden function, and those that need `alloc` are compiled
+  only with it. That is how the errors above were found.
+- **The published `.crate` holds only what the crate needs**: `include` in `Cargo.toml`
+  limits it to the sources, `doc/`, the README, changelog and license; it also shipped the
+  CI workflows, Dependabot configuration, coverage baseline, tests, test EDIDs and
+  examples.
+- **`#![deny(missing_docs)]` in `lib.rs`**: an undocumented public item fails a local
+  build, not only CI's rustdoc step.
+- **The documentation is built as docs.rs builds it, weekly**: `docs.yml` runs
+  `cargo doc --all-features` with nightly and `--cfg docsrs` (and `-D warnings`), so a
+  nightly change to the `doc_cfg` feature badges shows up before it breaks a docs.rs build.
+- **The examples and integration tests declare the features they need**
+  (`required-features`: `alloc`, and `serde` with `alloc` for the serde tests), so Cargo
+  skips them in builds without them instead of failing: `cargo test` and
+  `cargo clippy --all-targets` now work with `--no-default-features`, with or without
+  `--features serde`.
+- **CI runs with a read-only token by default**: `ci.yml` sets `permissions: contents: read`;
+  the coverage job keeps the write permissions it needs to open its ratchet PR. The test job
+  ran with the repository's default token permissions.
+- **CI's test job does not keep the checkout's git credentials** (`persist-credentials:
+  false`); it never pushes. The coverage job keeps them to push its ratchet branch.
+- **CI fails on `main` when `Cargo.toml` has a `[patch]` section**: `cargo package` drops
+  it, so a release built with one would not build from crates.io.
+- **Clippy lints the tests and examples too, in every feature set**: `--all-targets`, once
+  each with the default features, none, `alloc` only and `serde`, in CI and in the publish
+  workflow's `verify` job; it linted only the library with the default features.
+- **rustdoc runs with every feature and `-D warnings`**, as docs.rs builds, in CI and in
+  the publish workflow's `verify` job: `-D missing_docs` alone let broken intra-doc links
+  through, and the `serde` items were not checked.
+- **The no-default-features test runs the doctests too**, in CI and in the publish
+  workflow's `verify` job (`cargo test --no-default-features`, which skips the targets
+  that need `alloc`); it ran only `--lib`, which is how the crate-level example's failure
+  went unnoticed.
+- **The MSRV is checked**: an `MSRV` job in CI and in the publish workflow (which waits for
+  it) runs the tests in every feature set and the bare-metal builds on the `rust-version`
+  from `Cargo.toml` (1.85) with `cargo msrv verify`; the crate declared it, and nothing
+  checked it.
+- **The fuzz workflow runs with a read-only token and without the checkout's git
+  credentials**: it only reads the repository and uploads crash artifacts.
+- **`doc/setup.md` lists the checks CI runs**: clippy and the tests in every feature set,
+  rustdoc with every feature, the bare-metal `no_std` builds, the MSRV check and coverage.
+- **`doc/testing.md` describes the feature sets** CI runs the tests in, and how the README's
+  examples are compiled as doctests.
+- **`CONTRIBUTING.md` matches the CI checks** (clippy over all targets, rustdoc with
+  `-D warnings`, every feature set, the bare-metal builds and the MSRV), says
+  `#![forbid(unsafe_code)]` as the crate does (it said `deny`), and has a publishing
+  section on display-types and the crates that depend on piaf.
+- **The README has Stack position and Out of scope sections**, and its documentation list
+  links `CONTRIBUTING.md`.
+- **The crate root declares `#![no_std]` in every build**, with `std` and `alloc` brought in
+  as `extern crate`s behind their features, as the other Ashlar crates do; it was
+  `no_std` only without `std`. The library's tests import `vec!` from `alloc` in every
+  build with `alloc`, instead of only when `std` is off. No change to the API.
+- **The coverage job's cache is keyed on the Rust version** as well as `Cargo.lock`. After
+  the update to Rust 1.100, CI restored a `target/` built by 1.99; `cargo llvm-cov clean
+  --workspace` leaves the old instrumented binaries there, and the report counted their
+  lines as uncovered (94.75% instead of 96.93%).
+- **The publish workflow's `verify` job fails on a `[patch]` section** too, as `ci.yml`
+  does on `main`: the release does not wait for `main`'s CI.
+- **The coverage job runs cargo with `--locked`**, as the other jobs do, so it measures
+  the build the tests ran; `doc/setup.md`'s commands match.
+- **`CONTRIBUTING.md` states the provenance rule** for claims about HDMI behaviour (two
+  independent public implementations, cited), and gives the coverage tolerance as 0.1
+  percentage points, as CI checks it, not 0.1%.
+- **The MSRV job shows why it failed**: `cargo msrv verify` runs without
+  `--output-format minimal`, which printed only `true` or `false` and dropped the compiler
+  error.
+- **The docs say when a dependency's breaking release is one of this crate's** (not when
+  the version requirement keeps accepting the old release), give the coverage tolerance as
+  0.1 percentage points everywhere, and `doc/setup.md` installs the cargo-msrv version CI
+  pins (0.19.6).
+
 ## [0.7.0] - 2026-11-05
 
 ### Breaking changes

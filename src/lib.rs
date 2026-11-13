@@ -18,6 +18,7 @@
 //! # Quick start
 //!
 //! ```no_run
+//! # #[cfg(feature = "alloc")] {
 //! use piaf::{parse_edid, capabilities_from_edid, ExtensionLibrary};
 //!
 //! let bytes = std::fs::read("/sys/class/drm/card0-HDMI-A-1/edid").unwrap();
@@ -25,9 +26,12 @@
 //! let parsed = parse_edid(&bytes, &library).unwrap();
 //! let caps = capabilities_from_edid(&parsed, &library);
 //! println!("{:?}", caps.display_name);
+//! # }
 //! ```
-#![cfg_attr(not(feature = "std"), no_std)]
+#![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 // In a bare no_std build (no alloc, no std) the handler layer is absent, so the
 // pub(crate) decode functions on model types appear unused. They are intentionally
 // kept available for consumers who want to call them directly without the handler
@@ -37,8 +41,11 @@
     allow(dead_code, unused_imports)
 )]
 
-#[cfg(all(feature = "alloc", not(feature = "std")))]
+#[cfg(feature = "alloc")]
 extern crate alloc;
+
+#[cfg(feature = "std")]
+extern crate std;
 
 /// Types for the EDID data model.
 pub mod model;
@@ -99,3 +106,8 @@ pub use capabilities::{
 pub use capabilities::{DisplayIdCapabilities, DisplayIdImageSize, ImageSizeUnit};
 pub use capabilities::{capabilities_from_edid, capabilities_from_edid_with_options};
 pub use capabilities::{capabilities_from_edid_static, capabilities_from_edid_static_with_options};
+
+// Compiles and runs the README's examples as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;

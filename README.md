@@ -10,15 +10,7 @@
 
 > **Part of [Ashlar](https://ashlar-display.org)** — a display connection stack in Rust,
 > HDMI 2.1 first: from EDID parsing through mode negotiation to FRL link training.
->
-> [display-types](https://github.com/ashlar-display/display-types) ·
-> **piaf** ·
-> [concordance](https://github.com/ashlar-display/concordance) ·
-> [cartouche](https://github.com/ashlar-display/cartouche) ·
-> [culvert](https://github.com/ashlar-display/culvert) ·
-> [plumbob](https://github.com/ashlar-display/plumbob) ·
-> [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) ·
-> [hdmi-hal-i2c-dev](https://github.com/ashlar-display/hdmi-hal-i2c-dev)
+> See [all crates](https://ashlar-display.org/crates.html).
 
 A Rust library for decoding binary capability data into a clean, typed model, specialized for EDID.
 
@@ -43,6 +35,8 @@ which blocks came back with a bad checksum — without `alloc` and without keepi
 A driver runs it over a bus and hands the blocks it read to `parse_edid`.
 
 ```rust
+# #[cfg(feature = "std")]
+# fn example() -> Result<(), Box<dyn std::error::Error>> {
 use piaf::{parse_edid, capabilities_from_edid, ExtensionLibrary, ScreenSize};
 
 let bytes = std::fs::read("/sys/class/drm/card0-HDMI-A-1/edid")?;
@@ -55,8 +49,13 @@ if let Some(ScreenSize::Physical { width_cm, height_cm }) = caps.screen_size {
     println!("{}×{} cm", width_cm, height_cm);
 }
 for mode in &caps.supported_modes {
-    println!("  {}×{}@{}", mode.width, mode.height, mode.refresh_rate);
+    match mode.refresh_rate {
+        Some(rate) => println!("  {}×{}@{}", mode.width, mode.height, rate),
+        None => println!("  {}×{}", mode.width, mode.height),
+    }
 }
+# Ok(())
+# }
 ```
 
 See [`examples/inspect_displays.rs`](examples/inspect_displays.rs) for a more complete example.
@@ -115,7 +114,10 @@ Register via `ExtensionLibrary`. Uses `Box<dyn ExtensionHandler>` internally, so
 heap allocation:
 
 ```rust
-use piaf::{ExtensionHandler, DisplayCapabilities, ParseWarning, ExtensionLibrary};
+# #[cfg(feature = "alloc")] {
+use piaf::{
+    DisplayCapabilities, ExtensionHandler, ExtensionLibrary, ExtensionMetadata, ParseWarning,
+};
 
 #[derive(Debug)]
 struct MyHandler;
@@ -132,16 +134,23 @@ library.register(ExtensionMetadata {
     display_name: String::from("My Extension"),
     handler: Some(Box::new(MyHandler)),
 });
+# }
 ```
 
 Typed data can be attached to `DisplayCapabilities` and retrieved by tag:
 
 ```rust
+# #[cfg(feature = "alloc")] {
+# #[derive(Debug, Clone)]
+# struct MyCeaData { version: u8 }
+# let mut caps = piaf::DisplayCapabilities::default();
+# let block = [0u8; 128];
 caps.set_extension_data(0xAB, MyCeaData { version: block[1] });
 
 if let Some(data) = caps.get_extension_data::<MyCeaData>(0xAB) {
     println!("version: {}", data.version);
 }
+# }
 ```
 
 ### Static handlers (no-alloc)
@@ -150,7 +159,8 @@ Use `StaticExtensionHandler` when heap allocation is unavailable. Pass a `static
 to `capabilities_from_edid_static`:
 
 ```rust
-use piaf::{StaticExtensionHandler, ModeSink, StaticDisplayCapabilities, STANDARD_HANDLERS};
+# fn example(parsed: piaf::ParsedEdidRef<'_>) {
+use piaf::{StaticContext, StaticDisplayCapabilities, StaticExtensionHandler, STANDARD_HANDLERS};
 
 struct MyHandler;
 
@@ -166,6 +176,7 @@ static HANDLERS: &[&dyn StaticExtensionHandler] = &[STANDARD_HANDLERS[0], &MY_HA
 
 let caps: StaticDisplayCapabilities<64> =
     piaf::capabilities_from_edid_static(&parsed, HANDLERS);
+# }
 ```
 
 Static handlers extract modes only — audio, VSDB, colorimetry, and similar rich metadata
@@ -185,6 +196,8 @@ DTD with borders. By default piaf reads 1.3 and emits `DtdBordersAmbiguous`;
 `VideoMode::dtd_border_reading` and drops the warning:
 
 ```rust
+# #[cfg(feature = "alloc")]
+# fn example(bytes: &[u8]) -> Result<(), piaf::EdidError> {
 use piaf::{
     capabilities_from_edid_with_options, parse_edid, DecodeOptions, DtdBorderPolicy,
     DtdBorderReading, ExtensionLibrary,
@@ -195,6 +208,8 @@ let parsed = parse_edid(&bytes, &library)?;
 let options = DecodeOptions::new()
     .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
 let caps = capabilities_from_edid_with_options(&parsed, &library, options);
+# Ok(())
+# }
 ```
 
 EDIDs in practice use the 1.3 reading whatever version they declare, so the declared
@@ -398,6 +413,36 @@ contents merge into the same `Cea861Capabilities` instance the CEA-861 (`0x02`)
 extension writes to, regardless of which extension is processed first — see
 [`doc/displayid-2x.md`](doc/displayid-2x.md) for the merge semantics.
 
+## Stack position
+
+```mermaid
+flowchart LR
+    source["EDID bytes\n(a DDC read: hdmi-hal-i2c-dev, a driver, a file)"]
+    piaf["piaf"]
+    dt["display-types"]
+    negotiation["negotiation (concordance)\nthrough the integration layer"]
+
+    source --> piaf
+    dt -->|"the types it fills"| piaf
+    piaf -->|"DisplayCapabilities"| negotiation
+```
+
+piaf depends on [display-types](https://github.com/ashlar-display/display-types) and
+re-exports its types. It reads no bytes itself: a backend such as
+[hdmi-hal-i2c-dev](https://github.com/ashlar-display/hdmi-hal-i2c-dev) or a driver reads
+the EDID, following piaf's read plan. Negotiation does not depend on piaf; it takes
+display-types' `DisplayCapabilities`, so any parser that fills it can stand in for piaf.
+
+## Out of scope
+
+- **Reading the EDID** — piaf does no I/O; `read::EdidReadPlan` tells the caller what to
+  read, and the caller reads it over DDC, from sysfs or from a file.
+- **Choosing a mode** — piaf reports what the display declares; ranking and checking modes
+  against source and cable limits belongs to negotiation.
+- **Packets and signaling** — InfoFrames, SCDC and the PHY are other crates' concern.
+- **Vendor behaviour beyond safe parsing** — vendor-specific blocks are decoded as the
+  standards define them, or kept as raw payloads.
+
 ## Documentation
 
 Extended documentation lives under [`doc/`](doc/).
@@ -426,6 +471,8 @@ Extended documentation lives under [`doc/`](doc/).
 - [`doc/setup.md`](doc/setup.md) — build, test, and fuzzing setup
 - [`doc/testing.md`](doc/testing.md) — testing strategy, fixture corpus, and CI
 - [`doc/roadmap.md`](doc/roadmap.md) — planned features and future work
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute, and how releases reach the crates
+  that depend on piaf
 
 ## Verifying releases
 
