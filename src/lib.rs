@@ -30,6 +30,7 @@
 //! ```
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 // In a bare no_std build (no alloc, no std) the handler layer is absent, so the
 // pub(crate) decode functions on model types appear unused. They are intentionally
 // kept available for consumers who want to call them directly without the handler

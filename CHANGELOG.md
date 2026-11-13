@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   limits it to the sources, `doc/`, the README, changelog and license; it also shipped the
   CI workflows, Dependabot configuration, coverage baseline, tests, test EDIDs and
   examples.
+- **`#![deny(missing_docs)]` in `lib.rs`**: an undocumented public item fails a local
+  build, not only CI's rustdoc step.
 
 ## [0.7.0] - 2026-11-05
 
