@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checked it.
 - **The fuzz workflow runs with a read-only token and without the checkout's git
   credentials**: it only reads the repository and uploads crash artifacts.
+- **`doc/setup.md` lists the checks CI runs**: clippy and the tests in every feature set,
+  rustdoc with every feature, the bare-metal `no_std` builds, the MSRV check and coverage.
 
 ## [0.7.0] - 2026-11-05
 
