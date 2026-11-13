@@ -81,6 +81,15 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: No [patch] in a release
+        # cargo package drops [patch], so a crate built with one would not build from
+        # crates.io; ci.yml checks the same on main.
+        run: |
+          if grep -q '^\[patch' Cargo.toml; then
+            echo "::error::Cargo.toml has a [patch] section; remove it before release"
+            exit 1
+          fi
+
       - name: Format check
         run: cargo fmt --check
 
