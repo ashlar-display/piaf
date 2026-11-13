@@ -413,6 +413,36 @@ contents merge into the same `Cea861Capabilities` instance the CEA-861 (`0x02`)
 extension writes to, regardless of which extension is processed first — see
 [`doc/displayid-2x.md`](doc/displayid-2x.md) for the merge semantics.
 
+## Stack position
+
+```mermaid
+flowchart LR
+    source["EDID bytes\n(a DDC read: hdmi-hal-i2c-dev, a driver, a file)"]
+    piaf["piaf"]
+    dt["display-types"]
+    negotiation["negotiation (concordance)\nthrough the integration layer"]
+
+    source --> piaf
+    dt -->|"the types it fills"| piaf
+    piaf -->|"DisplayCapabilities"| negotiation
+```
+
+piaf depends on [display-types](https://github.com/ashlar-display/display-types) and
+re-exports its types. It reads no bytes itself: a backend such as
+[hdmi-hal-i2c-dev](https://github.com/ashlar-display/hdmi-hal-i2c-dev) or a driver reads
+the EDID, following piaf's read plan. Negotiation does not depend on piaf; it takes
+display-types' `DisplayCapabilities`, so any parser that fills it can stand in for piaf.
+
+## Out of scope
+
+- **Reading the EDID** — piaf does no I/O; `read::EdidReadPlan` tells the caller what to
+  read, and the caller reads it over DDC, from sysfs or from a file.
+- **Choosing a mode** — piaf reports what the display declares; ranking and checking modes
+  against source and cable limits belongs to negotiation.
+- **Packets and signaling** — InfoFrames, SCDC and the PHY are other crates' concern.
+- **Vendor behaviour beyond safe parsing** — vendor-specific blocks are decoded as the
+  standards define them, or kept as raw payloads.
+
 ## Documentation
 
 Extended documentation lives under [`doc/`](doc/).
@@ -441,6 +471,8 @@ Extended documentation lives under [`doc/`](doc/).
 - [`doc/setup.md`](doc/setup.md) — build, test, and fuzzing setup
 - [`doc/testing.md`](doc/testing.md) — testing strategy, fixture corpus, and CI
 - [`doc/roadmap.md`](doc/roadmap.md) — planned features and future work
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to contribute, and how releases reach the crates
+  that depend on piaf
 
 ## Verifying releases
 
