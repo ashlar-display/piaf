@@ -10,15 +10,7 @@
 
 > **Part of [Ashlar](https://ashlar-display.org)** — a display connection stack in Rust,
 > HDMI 2.1 first: from EDID parsing through mode negotiation to FRL link training.
->
-> [display-types](https://github.com/ashlar-display/display-types) ·
-> **piaf** ·
-> [concordance](https://github.com/ashlar-display/concordance) ·
-> [cartouche](https://github.com/ashlar-display/cartouche) ·
-> [culvert](https://github.com/ashlar-display/culvert) ·
-> [plumbob](https://github.com/ashlar-display/plumbob) ·
-> [hdmi-hal](https://github.com/ashlar-display/hdmi-hal) ·
-> [hdmi-hal-i2c-dev](https://github.com/ashlar-display/hdmi-hal-i2c-dev)
+> See [all crates](https://ashlar-display.org/crates.html).
 
 A Rust library for decoding binary capability data into a clean, typed model, specialized for EDID.
 
