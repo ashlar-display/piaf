@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The documentation is built as docs.rs builds it, weekly**: `docs.yml` runs
   `cargo doc --all-features` with nightly and `--cfg docsrs` (and `-D warnings`), so a
   nightly change to the `doc_cfg` feature badges shows up before it breaks a docs.rs build.
+- **The examples and integration tests declare that they need `alloc`**
+  (`required-features`), so Cargo skips them in builds without it instead of failing:
+  `cargo test` and `cargo clippy --all-targets` now work with `--no-default-features`.
 
 ## [0.7.0] - 2026-11-05
 

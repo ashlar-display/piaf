@@ -27,6 +27,24 @@ thiserror = { version = "2.0", default-features = false }
 [dev-dependencies]
 serde_json = { version = "1.0", optional = false }
 
+# The examples and integration tests use the `alloc` pipeline; without it Cargo skips
+# them instead of failing, so `cargo test --no-default-features` runs the rest.
+[[example]]
+name = "capture_fixture"
+required-features = ["alloc"]
+
+[[example]]
+name = "inspect_displays"
+required-features = ["alloc"]
+
+[[test]]
+name = "fixtures"
+required-features = ["alloc"]
+
+[[test]]
+name = "static_pipeline"
+required-features = ["alloc"]
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
