@@ -80,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section on display-types and the crates that depend on piaf.
 - **The README has Stack position and Out of scope sections**, and its documentation list
   links `CONTRIBUTING.md`.
+- **The crate root declares `#![no_std]` in every build**, with `std` and `alloc` brought in
+  as `extern crate`s behind their features, as the other Ashlar crates do; it was
+  `no_std` only without `std`. The library's tests import `vec!` from `alloc` in every
+  build with `alloc`, instead of only when `std` is off. No change to the API.
 
 ## [0.7.0] - 2026-11-05
 

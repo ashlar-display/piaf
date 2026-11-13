@@ -1552,7 +1552,7 @@ mod tests {
     use crate::model::color::{Chromaticity, ColorBitDepth};
     use crate::model::manufacture::{ManufactureDate, ManufacturerId, MonitorString};
     // Without `std`, `vec!` and `ToString` are not in the prelude.
-    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    #[cfg(feature = "alloc")]
     use alloc::{string::ToString, vec};
 
     // -----------------------------------------------------------------------

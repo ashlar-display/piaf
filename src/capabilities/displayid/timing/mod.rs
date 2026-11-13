@@ -141,7 +141,7 @@ mod tests {
         DisplayCapabilities, RefreshRate, StaticContext, StaticDisplayCapabilities,
     };
     // Without `std`, `vec!` is not in the prelude.
-    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    #[cfg(feature = "alloc")]
     use alloc::vec;
 
     #[allow(clippy::too_many_arguments)] // mirrors the wire-format field list

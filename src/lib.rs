@@ -28,7 +28,7 @@
 //! println!("{:?}", caps.display_name);
 //! # }
 //! ```
-#![cfg_attr(not(feature = "std"), no_std)]
+#![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -41,8 +41,11 @@
     allow(dead_code, unused_imports)
 )]
 
-#[cfg(all(feature = "alloc", not(feature = "std")))]
+#[cfg(feature = "alloc")]
 extern crate alloc;
+
+#[cfg(feature = "std")]
+extern crate std;
 
 /// Types for the EDID data model.
 pub mod model;

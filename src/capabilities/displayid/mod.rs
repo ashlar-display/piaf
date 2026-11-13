@@ -351,7 +351,7 @@ mod tests {
     use crate::model::extension::ExtensionHandler;
     use crate::model::manufacture::ManufacturerId;
     // Without `std`, `vec!` is not in the prelude.
-    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    #[cfg(feature = "alloc")]
     use alloc::vec;
 
     // -----------------------------------------------------------------------

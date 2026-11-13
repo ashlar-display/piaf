@@ -130,7 +130,7 @@ mod tests {
     use super::*;
     use crate::model::capabilities::{DisplayCapabilities, RefreshRate, SyncDefinition};
     // Without `std`, `vec!` is not in the prelude.
-    #[cfg(all(feature = "alloc", not(feature = "std")))]
+    #[cfg(feature = "alloc")]
     use alloc::vec;
 
     // -----------------------------------------------------------------------
