@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **crates.io lists piaf under `no-std` and `no-std::no-alloc`**: it builds without
+  `std` and without `alloc` (the static pipeline), but listed neither category.
+
 ### Fixed
 
 - **The crate-level example compiles without `alloc`**: it uses `ExtensionLibrary`, which

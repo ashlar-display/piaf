@@ -9,7 +9,7 @@ license = "MPL-2.0"
 repository = "https://github.com/ashlar-display/piaf"
 homepage = "https://ashlar-display.org"
 keywords = ["ashlar", "hdmi", "no-std", "edid", "displayid"]
-categories = ["hardware-support", "embedded", "parser-implementations"]
+categories = ["hardware-support", "embedded", "parser-implementations", "no-std", "no-std::no-alloc"]
 include = ["src/**", "doc/**", "README.md", "CHANGELOG.md", "LICENSE"]
 
 [features]
