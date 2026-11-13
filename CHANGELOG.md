@@ -57,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Clippy lints the tests and examples too, in every feature set**: `--all-targets`, once
   each with the default features, none, `alloc` only and `serde`, in CI and in the publish
   workflow's `verify` job; it linted only the library with the default features.
+- **rustdoc runs with every feature and `-D warnings`**, as docs.rs builds, in CI and in
+  the publish workflow's `verify` job: `-D missing_docs` alone let broken intra-doc links
+  through, and the `serde` items were not checked.
 
 ## [0.7.0] - 2026-11-05
 

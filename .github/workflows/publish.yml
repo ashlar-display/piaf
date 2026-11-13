@@ -96,8 +96,9 @@ jobs:
       - name: Clippy (serde)
         run: cargo clippy --locked --all-targets --features serde -- -D warnings
 
+      # docs.rs builds with every feature, so the docs are checked the same way.
       - name: Docs
-        run: cargo rustdoc --locked -- -D missing_docs
+        run: cargo rustdoc --locked --all-features -- -D warnings
 
       - name: Test (std)
         run: cargo test --locked
