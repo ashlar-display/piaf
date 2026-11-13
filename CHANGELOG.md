@@ -84,6 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `extern crate`s behind their features, as the other Ashlar crates do; it was
   `no_std` only without `std`. The library's tests import `vec!` from `alloc` in every
   build with `alloc`, instead of only when `std` is off. No change to the API.
+- **The coverage job's cache is keyed on the Rust version** as well as `Cargo.lock`. After
+  the update to Rust 1.100, CI restored a `target/` built by 1.99; `cargo llvm-cov clean
+  --workspace` leaves the old instrumented binaries there, and the report counted their
+  lines as uncovered (94.75% instead of 96.93%).
 
 ## [0.7.0] - 2026-11-05
 

@@ -160,6 +160,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install stable toolchain
+        id: toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
@@ -177,8 +178,11 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-coverage-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-coverage-
+          # The Rust version is in the key: a cache restored from another version holds
+          # instrumented binaries that `cargo llvm-cov clean --workspace` leaves behind, and
+          # the report would count their lines as uncovered.
+          key: ${{ runner.os }}-coverage-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-coverage-${{ steps.toolchain.outputs.cachekey }}-
 
       - name: Measure coverage
         run: |
