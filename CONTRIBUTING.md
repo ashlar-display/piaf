@@ -135,11 +135,13 @@ the PR.
 
 ## Coding standards
 
-- Run `cargo fmt` and `cargo clippy -- -D warnings` before pushing.
-- Public items need rustdoc comments (`cargo rustdoc -- -D missing_docs` must pass).
+- Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before pushing; CI runs
+  clippy in every feature set ([doc/setup.md](doc/setup.md) lists the commands).
+- Public items need rustdoc comments, and intra-doc links must resolve
+  (`cargo rustdoc --all-features -- -D warnings` must pass).
 - Follow the existing patterns in the codebase — see [`doc/architecture.md`](doc/architecture.md)
   and [`doc/model.md`](doc/model.md) for the design principles behind them.
-- `#![deny(unsafe_code)]` is enforced; no unsafe code.
+- `#![forbid(unsafe_code)]` is enforced; no unsafe code.
 - Keep `no_std` compatibility. The static pipeline and all scalar decoding must compile
   without `alloc` or `std`.
 
@@ -150,9 +152,22 @@ the PR.
   commits (or three PRs).
 - Tests are expected for new decoding logic. A unit test with a handcrafted byte slice is
   usually sufficient; a real fixture capture is a bonus.
-- CI must be green before a PR can merge: fmt, clippy, docs, all test and build targets,
+- CI must be green before a PR can merge: fmt, clippy, docs, the tests in every feature
+  set, the bare-metal `no_std` builds, the same tests and builds on the MSRV (Rust 1.85),
   and coverage must not drop more than 0.1% below the baseline (stored in
   `.coverage-baseline`). New decoding logic without tests will likely trip this.
+
+## Publishing and downstream dependencies
+
+piaf builds on [display-types](https://github.com/ashlar-display/display-types) and
+re-exports its types, so a breaking release of display-types is a breaking release of
+piaf. Other [Ashlar crates](https://ashlar-display.org/crates.html) depend on piaf as a
+versioned crate dependency. Changes that add or modify public API must be merged, tagged,
+and published to crates.io before downstream crates can adopt them. The workflow is:
+
+1. Merge and tag a release in this repo (`vX.Y.Z`).
+2. The publish CI workflow uploads the new version to crates.io.
+3. Update the version constraint in the downstream crate's `Cargo.toml`.
 
 ## Review process
 

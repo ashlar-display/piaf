@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rustdoc with every feature, the bare-metal `no_std` builds, the MSRV check and coverage.
 - **`doc/testing.md` describes the feature sets** CI runs the tests in, and how the README's
   examples are compiled as doctests.
+- **`CONTRIBUTING.md` matches the CI checks** (clippy over all targets, rustdoc with
+  `-D warnings`, every feature set, the bare-metal builds and the MSRV), says
+  `#![forbid(unsafe_code)]` as the crate does (it said `deny`), and has a publishing
+  section on display-types and the crates that depend on piaf.
 
 ## [0.7.0] - 2026-11-05
 
