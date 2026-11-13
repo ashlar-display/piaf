@@ -43,6 +43,8 @@ which blocks came back with a bad checksum — without `alloc` and without keepi
 A driver runs it over a bus and hands the blocks it read to `parse_edid`.
 
 ```rust
+# #[cfg(feature = "std")]
+# fn example() -> Result<(), Box<dyn std::error::Error>> {
 use piaf::{parse_edid, capabilities_from_edid, ExtensionLibrary, ScreenSize};
 
 let bytes = std::fs::read("/sys/class/drm/card0-HDMI-A-1/edid")?;
@@ -55,8 +57,13 @@ if let Some(ScreenSize::Physical { width_cm, height_cm }) = caps.screen_size {
     println!("{}×{} cm", width_cm, height_cm);
 }
 for mode in &caps.supported_modes {
-    println!("  {}×{}@{}", mode.width, mode.height, mode.refresh_rate);
+    match mode.refresh_rate {
+        Some(rate) => println!("  {}×{}@{}", mode.width, mode.height, rate),
+        None => println!("  {}×{}", mode.width, mode.height),
+    }
 }
+# Ok(())
+# }
 ```
 
 See [`examples/inspect_displays.rs`](examples/inspect_displays.rs) for a more complete example.
@@ -115,7 +122,10 @@ Register via `ExtensionLibrary`. Uses `Box<dyn ExtensionHandler>` internally, so
 heap allocation:
 
 ```rust
-use piaf::{ExtensionHandler, DisplayCapabilities, ParseWarning, ExtensionLibrary};
+# #[cfg(feature = "alloc")] {
+use piaf::{
+    DisplayCapabilities, ExtensionHandler, ExtensionLibrary, ExtensionMetadata, ParseWarning,
+};
 
 #[derive(Debug)]
 struct MyHandler;
@@ -132,16 +142,23 @@ library.register(ExtensionMetadata {
     display_name: String::from("My Extension"),
     handler: Some(Box::new(MyHandler)),
 });
+# }
 ```
 
 Typed data can be attached to `DisplayCapabilities` and retrieved by tag:
 
 ```rust
+# #[cfg(feature = "alloc")] {
+# #[derive(Debug, Clone)]
+# struct MyCeaData { version: u8 }
+# let mut caps = piaf::DisplayCapabilities::default();
+# let block = [0u8; 128];
 caps.set_extension_data(0xAB, MyCeaData { version: block[1] });
 
 if let Some(data) = caps.get_extension_data::<MyCeaData>(0xAB) {
     println!("version: {}", data.version);
 }
+# }
 ```
 
 ### Static handlers (no-alloc)
@@ -150,7 +167,8 @@ Use `StaticExtensionHandler` when heap allocation is unavailable. Pass a `static
 to `capabilities_from_edid_static`:
 
 ```rust
-use piaf::{StaticExtensionHandler, ModeSink, StaticDisplayCapabilities, STANDARD_HANDLERS};
+# fn example(parsed: piaf::ParsedEdidRef<'_>) {
+use piaf::{StaticContext, StaticDisplayCapabilities, StaticExtensionHandler, STANDARD_HANDLERS};
 
 struct MyHandler;
 
@@ -166,6 +184,7 @@ static HANDLERS: &[&dyn StaticExtensionHandler] = &[STANDARD_HANDLERS[0], &MY_HA
 
 let caps: StaticDisplayCapabilities<64> =
     piaf::capabilities_from_edid_static(&parsed, HANDLERS);
+# }
 ```
 
 Static handlers extract modes only — audio, VSDB, colorimetry, and similar rich metadata
@@ -185,6 +204,8 @@ DTD with borders. By default piaf reads 1.3 and emits `DtdBordersAmbiguous`;
 `VideoMode::dtd_border_reading` and drops the warning:
 
 ```rust
+# #[cfg(feature = "alloc")]
+# fn example(bytes: &[u8]) -> Result<(), piaf::EdidError> {
 use piaf::{
     capabilities_from_edid_with_options, parse_edid, DecodeOptions, DtdBorderPolicy,
     DtdBorderReading, ExtensionLibrary,
@@ -195,6 +216,8 @@ let parsed = parse_edid(&bytes, &library)?;
 let options = DecodeOptions::new()
     .with_dtd_border_policy(DtdBorderPolicy::Fixed(DtdBorderReading::Edid14));
 let caps = capabilities_from_edid_with_options(&parsed, &library, options);
+# Ok(())
+# }
 ```
 
 EDIDs in practice use the 1.3 reading whatever version they declare, so the declared

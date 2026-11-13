@@ -101,3 +101,8 @@ pub use capabilities::{
 pub use capabilities::{DisplayIdCapabilities, DisplayIdImageSize, ImageSizeUnit};
 pub use capabilities::{capabilities_from_edid, capabilities_from_edid_with_options};
 pub use capabilities::{capabilities_from_edid_static, capabilities_from_edid_static_with_options};
+
+// Compiles and runs the README's examples as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;

@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The crate-level example compiles without `alloc`**: it uses `ExtensionLibrary`, which
   needs `alloc`, so `cargo test --no-default-features` failed on it; it now runs only where
   that type exists.
+- **The README's examples compile against the current API.** The usage example printed
+  `mode.refresh_rate` with `{}`, but it is an `Option<RefreshRate>`; the dynamic handler
+  example did not import `ExtensionMetadata`; the static handler example did not import
+  `StaticContext`.
+
+### Internal
+
+- **The README's Rust examples run as doctests** (`ReadmeDoctests` in `lib.rs`, compiled
+  only for `cargo test`): the self-contained ones run, the ones that need an EDID or a
+  file are compiled inside a hidden function, and those that need `alloc` are compiled
+  only with it. That is how the errors above were found.
 
 ## [0.7.0] - 2026-11-05
 
