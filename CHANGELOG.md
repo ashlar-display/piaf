@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only for `cargo test`): the self-contained ones run, the ones that need an EDID or a
   file are compiled inside a hidden function, and those that need `alloc` are compiled
   only with it. That is how the errors above were found.
+- **The published `.crate` holds only what the crate needs**: `include` in `Cargo.toml`
+  limits it to the sources, `doc/`, the README, changelog and license; it also shipped the
+  CI workflows, Dependabot configuration, coverage baseline, tests, test EDIDs and
+  examples.
 
 ## [0.7.0] - 2026-11-05
 
