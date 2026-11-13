@@ -43,6 +43,16 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: No [patch] on main
+        # A [patch] points a dependency at unreleased code for a prototype; cargo package
+        # drops it, so a release built with one would not build from crates.io.
+        if: github.ref == 'refs/heads/main'
+        run: |
+          if grep -q '^\[patch' Cargo.toml; then
+            echo "::error::Cargo.toml has a [patch] section; remove it before release"
+            exit 1
+          fi
+
       - name: Format check
         run: cargo fmt --check
 
