@@ -18,6 +18,7 @@
 //! # Quick start
 //!
 //! ```no_run
+//! # #[cfg(feature = "alloc")] {
 //! use piaf::{parse_edid, capabilities_from_edid, ExtensionLibrary};
 //!
 //! let bytes = std::fs::read("/sys/class/drm/card0-HDMI-A-1/edid").unwrap();
@@ -25,6 +26,7 @@
 //! let parsed = parse_edid(&bytes, &library).unwrap();
 //! let caps = capabilities_from_edid(&parsed, &library);
 //! println!("{:?}", caps.display_name);
+//! # }
 //! ```
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
