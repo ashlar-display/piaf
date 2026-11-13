@@ -121,6 +121,61 @@ jobs:
       - name: Build (no_std)
         run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
+  msrv:
+    name: MSRV
+    needs: check-branch
+    if: needs.check-branch.outputs.on_main == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CARGO_MSRV_VERSION: 0.19.6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Restore and save are separate steps so the binary is cached as soon as it is
+      # built: a combined cache step saves only when the whole job succeeds, so while the
+      # MSRV is broken every run would rebuild cargo-msrv.
+      - name: Restore cargo-msrv
+        id: msrv-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-msrv
+          key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
+
+      - name: Install cargo-msrv
+        if: steps.msrv-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-msrv --version "${CARGO_MSRV_VERSION}" --locked
+
+      - name: Save cargo-msrv
+        if: steps.msrv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-msrv
+          key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
+
+      - name: Verify MSRV (test)
+        run: cargo msrv verify --output-format minimal -- cargo test --locked
+
+      - name: Verify MSRV (test, serde)
+        run: cargo msrv verify --output-format minimal -- cargo test --locked --features serde
+
+      - name: Verify MSRV (test, alloc only)
+        run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features --features alloc
+
+      - name: Verify MSRV (test, no default features)
+        run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features
+
+      - name: Verify MSRV (no_std, alloc only)
+        run: >
+          cargo msrv verify --output-format minimal --target thumbv7em-none-eabi
+          -- cargo build --locked --no-default-features --features alloc --target thumbv7em-none-eabi
+
+      - name: Verify MSRV (no_std)
+        run: >
+          cargo msrv verify --output-format minimal --target thumbv7em-none-eabi
+          -- cargo build --locked --no-default-features --target thumbv7em-none-eabi
+
   # What is about to be released, shown on the run page while the publish job
   # waits for approval in the `release` environment. Packages the crate the same
   # way the publish job does (compiling nothing, holding no credentials) so the
@@ -230,7 +285,7 @@ jobs:
   # the OIDC / crates.io token is available.
   publish:
     name: Publish to crates.io
-    needs: [check-branch, verify, summary]
+    needs: [check-branch, verify, msrv, summary]
     if: needs.check-branch.outputs.on_main == 'true'
     runs-on: ubuntu-latest
     environment: release

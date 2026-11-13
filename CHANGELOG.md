@@ -64,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflow's `verify` job (`cargo test --no-default-features`, which skips the targets
   that need `alloc`); it ran only `--lib`, which is how the crate-level example's failure
   went unnoticed.
+- **The MSRV is checked**: an `MSRV` job in CI and in the publish workflow (which waits for
+  it) runs the tests in every feature set and the bare-metal builds on the `rust-version`
+  from `Cargo.toml` (1.85) with `cargo msrv verify`; the crate declared it, and nothing
+  checked it.
 
 ## [0.7.0] - 2026-11-05
 

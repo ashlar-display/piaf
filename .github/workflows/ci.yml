@@ -93,6 +93,63 @@ jobs:
       - name: Build (no_std)
         run: cargo build --locked --no-default-features --target thumbv7em-none-eabi
 
+  # cargo-msrv reads the MSRV from Cargo.toml's rust-version and runs the checks on that
+  # toolchain. Built from crates.io with --locked at a pinned version, not install-action:
+  # it has no manifest for cargo-msrv and would fall back to an unpinned cargo-binstall
+  # download. Dependabot does not bump CARGO_MSRV_VERSION; bump it by hand.
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    env:
+      CARGO_MSRV_VERSION: 0.19.6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Restore and save are separate steps so the binary is cached as soon as it is
+      # built: a combined cache step saves only when the whole job succeeds, so while the
+      # MSRV is broken every run would rebuild cargo-msrv.
+      - name: Restore cargo-msrv
+        id: msrv-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-msrv
+          key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
+
+      - name: Install cargo-msrv
+        if: steps.msrv-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-msrv --version "${CARGO_MSRV_VERSION}" --locked
+
+      - name: Save cargo-msrv
+        if: steps.msrv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-msrv
+          key: ${{ runner.os }}-cargo-msrv-${{ env.CARGO_MSRV_VERSION }}
+
+      - name: Verify MSRV (test)
+        run: cargo msrv verify --output-format minimal -- cargo test --locked
+
+      - name: Verify MSRV (test, serde)
+        run: cargo msrv verify --output-format minimal -- cargo test --locked --features serde
+
+      - name: Verify MSRV (test, alloc only)
+        run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features --features alloc
+
+      - name: Verify MSRV (test, no default features)
+        run: cargo msrv verify --output-format minimal -- cargo test --locked --no-default-features
+
+      - name: Verify MSRV (no_std, alloc only)
+        run: >
+          cargo msrv verify --output-format minimal --target thumbv7em-none-eabi
+          -- cargo build --locked --no-default-features --features alloc --target thumbv7em-none-eabi
+
+      - name: Verify MSRV (no_std)
+        run: >
+          cargo msrv verify --output-format minimal --target thumbv7em-none-eabi
+          -- cargo build --locked --no-default-features --target thumbv7em-none-eabi
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
