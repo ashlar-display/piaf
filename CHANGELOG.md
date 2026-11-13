@@ -72,6 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credentials**: it only reads the repository and uploads crash artifacts.
 - **`doc/setup.md` lists the checks CI runs**: clippy and the tests in every feature set,
   rustdoc with every feature, the bare-metal `no_std` builds, the MSRV check and coverage.
+- **`doc/testing.md` describes the feature sets** CI runs the tests in, and how the README's
+  examples are compiled as doctests.
 
 ## [0.7.0] - 2026-11-05
 
