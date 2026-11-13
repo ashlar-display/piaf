@@ -60,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **rustdoc runs with every feature and `-D warnings`**, as docs.rs builds, in CI and in
   the publish workflow's `verify` job: `-D missing_docs` alone let broken intra-doc links
   through, and the `serde` items were not checked.
+- **The no-default-features test runs the doctests too**, in CI and in the publish
+  workflow's `verify` job (`cargo test --no-default-features`, which skips the targets
+  that need `alloc`); it ran only `--lib`, which is how the crate-level example's failure
+  went unnoticed.
 
 ## [0.7.0] - 2026-11-05
 

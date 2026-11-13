@@ -109,10 +109,11 @@ jobs:
       - name: Test (alloc only)
         run: cargo test --locked --no-default-features --features alloc
 
-      # The integration tests need `alloc`; the library's own tests also cover bare
-      # `no_std` paths (the static pipeline without `BaseBlockHandler`).
-      - name: Test (no_std, library)
-        run: cargo test --locked --no-default-features --lib
+      # The integration tests and examples declare that they need `alloc`, so Cargo skips
+      # them here; the library's own tests cover the bare `no_std` paths (the static
+      # pipeline without `BaseBlockHandler`), and the doctests run too.
+      - name: Test (no default features)
+        run: cargo test --locked --no-default-features
 
       - name: Build (alloc only)
         run: cargo build --locked --no-default-features --features alloc --target thumbv7em-none-eabi
