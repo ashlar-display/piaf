@@ -45,6 +45,10 @@ required-features = ["alloc"]
 name = "static_pipeline"
 required-features = ["alloc"]
 
+[[test]]
+name = "serde"
+required-features = ["serde", "alloc"]
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

@@ -44,9 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The documentation is built as docs.rs builds it, weekly**: `docs.yml` runs
   `cargo doc --all-features` with nightly and `--cfg docsrs` (and `-D warnings`), so a
   nightly change to the `doc_cfg` feature badges shows up before it breaks a docs.rs build.
-- **The examples and integration tests declare that they need `alloc`**
-  (`required-features`), so Cargo skips them in builds without it instead of failing:
-  `cargo test` and `cargo clippy --all-targets` now work with `--no-default-features`.
+- **The examples and integration tests declare the features they need**
+  (`required-features`: `alloc`, and `serde` with `alloc` for the serde tests), so Cargo
+  skips them in builds without them instead of failing: `cargo test` and
+  `cargo clippy --all-targets` now work with `--no-default-features`, with or without
+  `--features serde`.
 - **CI runs with a read-only token by default**: `ci.yml` sets `permissions: contents: read`;
   the coverage job keeps the write permissions it needs to open its ratchet PR. The test job
   ran with the repository's default token permissions.
