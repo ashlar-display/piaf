@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **docs.rs marks the items that need a feature** (`alloc`, `std`, `serde`) with the
+  `doc_cfg` badge, enabled only in docs.rs builds.
+
 ### Changed
 
 - **crates.io lists piaf under `no-std` and `no-std::no-alloc`**: it builds without
@@ -34,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   examples.
 - **`#![deny(missing_docs)]` in `lib.rs`**: an undocumented public item fails a local
   build, not only CI's rustdoc step.
+- **The documentation is built as docs.rs builds it, weekly**: `docs.yml` runs
+  `cargo doc --all-features` with nightly and `--cfg docsrs` (and `-D warnings`), so a
+  nightly change to the `doc_cfg` feature badges shows up before it breaks a docs.rs build.
 
 ## [0.7.0] - 2026-11-05
 

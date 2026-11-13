@@ -29,6 +29,7 @@
 //! # }
 //! ```
 #![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 // In a bare no_std build (no alloc, no std) the handler layer is absent, so the

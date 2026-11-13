@@ -26,3 +26,10 @@ thiserror = { version = "2.0", default-features = false }
 
 [dev-dependencies]
 serde_json = { version = "1.0", optional = false }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(docsrs)"] }
