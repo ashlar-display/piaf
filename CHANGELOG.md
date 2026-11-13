@@ -68,6 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it) runs the tests in every feature set and the bare-metal builds on the `rust-version`
   from `Cargo.toml` (1.85) with `cargo msrv verify`; the crate declared it, and nothing
   checked it.
+- **The fuzz workflow runs with a read-only token and without the checkout's git
+  credentials**: it only reads the repository and uploads crash artifacts.
 
 ## [0.7.0] - 2026-11-05
 
