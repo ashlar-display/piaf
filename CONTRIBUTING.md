@@ -163,8 +163,8 @@ the PR.
 ## Publishing and downstream dependencies
 
 piaf builds on [display-types](https://github.com/ashlar-display/display-types) and
-re-exports its types, so a breaking release of display-types is a breaking release of
-piaf. Other [Ashlar crates](https://ashlar-display.org/crates.html) depend on piaf as a
+re-exports its types, so moving to a breaking release of display-types is a breaking
+release of piaf, unless the version requirement keeps accepting the old release as well. Other [Ashlar crates](https://ashlar-display.org/crates.html) depend on piaf as a
 versioned crate dependency. Changes that add or modify public API must be merged, tagged,
 and published to crates.io before downstream crates can adopt them. The workflow is:
 

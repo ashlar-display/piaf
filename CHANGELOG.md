@@ -100,6 +100,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The MSRV job shows why it failed**: `cargo msrv verify` runs without
   `--output-format minimal`, which printed only `true` or `false` and dropped the compiler
   error.
+- **The docs say when a dependency's breaking release is one of this crate's** (not when
+  the version requirement keeps accepting the old release), give the coverage tolerance as
+  0.1 percentage points everywhere, and `doc/setup.md` installs the cargo-msrv version CI
+  pins (0.19.6).
 
 ## [0.7.0] - 2026-11-05
 
