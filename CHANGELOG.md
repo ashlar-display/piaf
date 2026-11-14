@@ -104,6 +104,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the version requirement keeps accepting the old release), give the coverage tolerance as
   0.1 percentage points everywhere, and `doc/setup.md` installs the cargo-msrv version CI
   pins (0.19.6).
+- **`doc/setup.md` says to measure the coverage baseline with the Rust version CI uses**:
+  Rust versions count lines differently, so a baseline measured with another version can
+  fail CI without a change in coverage.
 
 ## [0.7.0] - 2026-11-05
 

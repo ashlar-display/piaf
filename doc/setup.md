@@ -80,6 +80,11 @@ cargo llvm-cov report --summary-only
 CI fails when line coverage drops more than 0.1 points below `.coverage-baseline`, and
 opens a PR raising the baseline when a push improves it.
 
+Rust versions count lines differently, so the same code can measure differently on two
+versions. Measure the baseline with the Rust version CI's `stable` uses
+(`cargo +<version> llvm-cov …`), or CI can fail on a baseline that a different local
+version produced.
+
 ## Fuzzing
 
 Fuzzing requires nightly:
